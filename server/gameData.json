@@ -1,0 +1,15 @@
+{
+  "players": {
+    "default": {
+      "credits": 1708.5900000000006,
+      "stats": {
+        "totalSpins": 0,
+        "totalWins": 1,
+        "totalBet": 0,
+        "totalWon": 0.55,
+        "bonusTriggers": 0
+      },
+      "lastUpdated": 1743434018633
+    }
+  }
+}

@@ -48,34 +48,55 @@ export default class PreloadScene extends Phaser.Scene {
     
     console.log('Loading game assets...');
     
-    // Load symbol sprites - wrap in try/catch to see errors
+    
+     // Load symbol sprites - wrap in try/catch to see errors
     try {
-      this.load.image('chest', 'assets/images/symbols/chest.png');
-      this.load.image('captain', 'assets/images/symbols/captain.png');
-      this.load.image('ship', 'assets/images/symbols/ship.png');
-      this.load.image('mermaid', 'assets/images/symbols/mermaid.png');
-      this.load.image('anchor', 'assets/images/symbols/anchor.png');
-      this.load.image('compass', 'assets/images/symbols/compass.png');
+      // New Themed Symbols
+      this.load.image('pam_mike', 'assets/images/symbols/pam_mike.png');   // Replaces chest
+      this.load.image('grant', 'assets/images/symbols/grant.png');         // Replaces captain
+      this.load.image('logan', 'assets/images/symbols/logan.png');         // Replaces ship
+      this.load.image('nick', 'assets/images/symbols/nick.png');           // Replaces mermaid
+      this.load.image('beer', 'assets/images/symbols/beer.png');           // Replaces anchor
+      this.load.image('flag', 'assets/images/symbols/flag.png');           // Replaces compass
+      this.load.image('loon', 'assets/images/symbols/loon.png');           // Replaces kraken (Wild)
+      this.load.image('fire', 'assets/images/symbols/fire.png');           // Replaces map (Scatter)
+      this.load.image('elsi', 'assets/images/symbols/elsi.png');           // Replaces pearl (Bonus Trigger) & Puppy Bonus
+
+      // Low Symbols (Keep)
       this.load.image('a', 'assets/images/symbols/a.png');
       this.load.image('k', 'assets/images/symbols/k.png');
       this.load.image('q', 'assets/images/symbols/q.png');
       this.load.image('j', 'assets/images/symbols/j.png');
-      this.load.image('kraken', 'assets/images/symbols/kraken.png');
-      this.load.image('map', 'assets/images/symbols/map.png');
-      this.load.image('pearl', 'assets/images/symbols/pearl.png');
-      
-      // Load UI elements
+
+      // Load Puppy Bonus Assets
+      this.load.image('puppy_background', 'assets/images/bonus/puppy_background.png'); // Adjust path if needed
+      this.load.image('puppy_logo', 'assets/images/bonus/puppy_logo.png'); // Adjust path if needed
+
+         // Load Free Spins Bonus Assets
+         this.load.image('freespins_background', 'assets/images/bonus/freespins_background.png'); // Adjust path if needed
+         this.load.image('freespins_logo', 'assets/images/bonus/freespins_logo.png'); // Adjust path if needed
+
+// Add these inside PreloadScene.js's preload() method's try block:
+this.load.image('main_background', 'assets/images/ui/main_background.png'); // Adjust path
+this.load.image('main_logo', 'assets/images/ui/main_logo.png'); // Adjust path
+
+      // Additional Dog Images for Puppy Bonus Scene
+      this.load.image('ruby', 'assets/images/symbols/ruby.png');
+      this.load.image('marlin', 'assets/images/symbols/marlin.png');
+      this.load.image('minnow', 'assets/images/symbols/minnow.png');
+
+      // Load UI elements (Assuming these filenames are still correct)
       this.load.image('background', 'assets/images/ui/background.png');
       this.load.image('reelBackground', 'assets/images/ui/reel-background.png');
       this.load.image('spinButton', 'assets/images/ui/spin-button.png');
       this.load.image('betUpButton', 'assets/images/ui/bet-up.png');
       this.load.image('betDownButton', 'assets/images/ui/bet-down.png');
-      
-      // Load audio
+
+      // Load audio (Assuming these filenames are still correct)
       this.load.audio('spinSound', 'assets/sounds/spin.mp3');
       this.load.audio('winSound', 'assets/sounds/win.mp3');
       this.load.audio('bonusSound', 'assets/sounds/bonus.mp3');
-      
+
       console.log('All assets loaded successfully');
     } catch (e) {
       console.error('Error loading assets:', e);

@@ -138,6 +138,8 @@ export default class PuppyBonusScene extends Phaser.Scene {
       .setDepth(1000);
 
     console.log("PuppyBonusScene: create() finished.");
+    this.sound.play('music_bonus_puppy_loop', { loop: true });
+
   }
 
   revealPrize(dogPhoto) {
@@ -146,7 +148,7 @@ export default class PuppyBonusScene extends Phaser.Scene {
     dogPhoto.disableInteractive();
     dogPhoto.setData('revealed', true);
     this.picksUsed++;
-    console.log(`PuppyBonusScene: Revealing item index ${dogPhoto.getData('index')} (Pick ${this.picksUsed}/${this.picksUsed + this.picks})`);
+    console.log(`PuppyBonusScene: Revealing item index ${dogPhoto.getData('index')} (Pick ${this.picksUsed}/${this.picksUsed + this.picks - 1})`);
 
     this.tweens.add({
       targets: dogPhoto,
@@ -156,14 +158,16 @@ export default class PuppyBonusScene extends Phaser.Scene {
       yoyo: false
     });
 
-    // NEW: Get weighted outcome for this pick
-    const outcome = this.outcomeManager.getPuppyBonusOutcome(this.picksUsed, this.picks + this.picksUsed);
+    // Get weighted outcome for this pick
+    const totalPicks = this.picksUsed + this.picks - 1; // Total picks available at start
+    const outcome = this.outcomeManager.getPuppyBonusOutcome(this.picksUsed, totalPicks);
     console.log("PuppyBonusScene: Got outcome:", outcome);
 
     if (outcome.type === 'poop') { // POOP!
       console.log("PuppyBonusScene: Revealed POOP!");
       let poopDisplay;
-      
+      this.sound.play('sfx_pick_poop');
+
       if (this.textures.exists('poop')) {
         poopDisplay = this.add.image(dogPhoto.x, dogPhoto.y, 'poop')
           .setDisplaySize(80, 80)
@@ -188,11 +192,37 @@ export default class PuppyBonusScene extends Phaser.Scene {
         repeat: 3 
       });
       
-      this.endBonus("POOP");
+      // If ending too early, ensure minimum win
+      if (this.totalWin < this.bet * 5) {
+        console.log("PuppyBonusScene: Total win too low, converting POOP to minimum prize");
+        this.time.delayedCall(500, () => {
+          poopDisplay.destroy();
+          const minPrize = this.bet * (5 - this.totalWin / this.bet);
+          this.totalWin += minPrize;
+          
+          const prizeText = this.add.text(dogPhoto.x, dogPhoto.y, `${minPrize.toFixed(2)}`, {
+            fontSize: '20px', 
+            fontStyle: 'bold', 
+            color: '#FFFF00',
+            stroke: '#000000', 
+            strokeThickness: 3, 
+            backgroundColor: '#000000A0',
+            padding: {x: 5, y: 3}
+          })
+          .setOrigin(0.5)
+          .setDepth(dogPhoto.depth + 1);
+          
+          this.winText.setText(`BONUS WIN: ${this.totalWin.toFixed(2)}`);
+          this.endBonus("MIN_WIN_ADJUSTED");
+        });
+      } else {
+        this.endBonus("POOP");
+      }
     } else { // Credit Win
       const prizeAmount = outcome.multiplier * this.bet;
       this.totalWin += prizeAmount;
       console.log(`PuppyBonusScene: Revealed prize ${outcome.multiplier}x, amount ${prizeAmount.toFixed(2)}. Total win: ${this.totalWin.toFixed(2)}`);
+      this.sound.play('sfx_pick_credit');
 
       const prizeTextStyle = {
         fontSize: '20px', 
@@ -238,6 +268,7 @@ export default class PuppyBonusScene extends Phaser.Scene {
     if (this.isEnding) return;
     this.isEnding = true;
     console.log(`PuppyBonusScene: endBonus() called. Reason: ${reason}. Win: ${this.totalWin}.`);
+    this.sound.play('sfx_bonus_end');
 
     this.dogPhotoSprites.forEach(p => p.disableInteractive());
 
@@ -263,7 +294,10 @@ export default class PuppyBonusScene extends Phaser.Scene {
       alpha: 1, 
       duration: 500 
     });
-
+    if (this.sound.get('music_bonus_puppy_loop')) {
+      this.sound.stopByKey('music_bonus_puppy_loop');
+    }
+    
     const delayDuration = 3000;
     console.log(`PuppyBonusScene: Scheduling stop & GLOBAL event in ${delayDuration}ms.`);
 

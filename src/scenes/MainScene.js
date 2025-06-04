@@ -82,6 +82,9 @@ export default class MainScene extends Phaser.Scene {
 
   wake() {
     console.log("MainScene: wake() called - scene was resumed");
+    this.cleanupAnticipationEffects();
+
+
     if (this.reelState === 'bonus') {
       console.log("MainScene: Detected wake from bonus - restoring visibility");
       this.scene.setVisible(true);
@@ -102,6 +105,34 @@ export default class MainScene extends Phaser.Scene {
  // DEFINITIVE FIX for runSpinAnimation method
 // This ensures the final board symbols end up exactly where they should be
 
+cleanupAnticipationEffects() {
+  this.inAnticipation = false;
+
+  // Clean up all anticipation elements
+  if (this.anticipationElements) {
+    Object.values(this.anticipationElements).forEach(el => el?.destroy());
+    this.anticipationElements = null;
+  }
+  
+  if (this.scatterGlows) {
+    this.scatterGlows.forEach(g => g?.destroy());
+    this.scatterGlows = [];
+  }
+
+  if (this.anticipationSpotlights) {
+    this.anticipationSpotlights.forEach(s => s.destroy());
+    this.anticipationSpotlights = null;
+  }
+  
+  
+  // Clean up any spotlight effects
+  this.children.list.forEach(child => {
+    if (child && child.type === 'Circle' && child.blendMode === Phaser.BlendModes.ADD) {
+      child.destroy();
+    }
+  });
+}
+
 runSpinAnimation(finalBoard, outcome) {
   const spinInterval = 100;
   const baseTotalShifts = 25;
@@ -116,53 +147,35 @@ runSpinAnimation(finalBoard, outcome) {
   this.applyMaskToAll();
   this.spinSequences = [];
   
- // Inside runSpinAnimation method:
-
-// Create spin sequences with CORRECT final positioning
-for (let reel = 0; reel < config.reels; reel++) {
-  let reelTotalShifts = baseTotalShifts + reel * reelDelayFactor;
-  let seq = [];
-
-  // Determine number of symbols needed for the final display rows + 1 dummy for the final off-screen position
-  const finalBlockLength = config.rows + 1;
-
-  // Fill with random symbols, leaving space for the finalBlockLength
-  for (let i = 0; i < reelTotalShifts - finalBlockLength; i++) {
-      seq.push(symbolOptions[Math.floor(Math.random() * symbolOptions.length)]);
-  }
-
-  // Add the finalBoard symbols that will be visible, in the specific order they need to be shifted.
-  // To make finalBoard[reel][0] appear on visible row 0, it must be S_SecondLast.
-  // To make finalBoard[reel][config.rows-1] appear on visible row (config.rows-1), it must be S_(N+1)thLast.
-  // This means we push them in order from last visible row up to first visible row.
-  for (let row = config.rows - 1; row >= 0; row--) {
-      seq.push(finalBoard[reel][row]); 
-      // Example for config.rows = 3:
-      // Pushes finalBoard[reel][2] (will become S_(N+1)thLast)
-      // Pushes finalBoard[reel][1] (will become S_ThirdLast)
-      // Pushes finalBoard[reel][0] (will become S_SecondLast)
-  }
-
-  // Add one more dummy symbol. This will be S_Last, which ends up on the off-screen sprite.
-  seq.push(symbolOptions[Math.floor(Math.random() * symbolOptions.length)]); // Or a fixed default like symbolOptions[0]
-
-  this.spinSequences[reel] = seq;
-
-  // Sanity check for sequence length
-  if (seq.length !== reelTotalShifts) {
-      console.error(`Reel ${reel} sequence length mismatch! Expected ${reelTotalShifts}, Got ${seq.length}. Config rows: ${config.rows}, Final block: ${finalBlockLength}`);
-  }
-}
+  // Track scatter positions for anticipation
+  const scatterPositions = [];
+  let scattersLanded = 0;
   
-  // Set up sprites for animation (same as before)
+  // Create spin sequences (same as before)
+  for (let reel = 0; reel < config.reels; reel++) {
+    let reelTotalShifts = baseTotalShifts + reel * reelDelayFactor;
+    let seq = [];
+    const finalBlockLength = config.rows + 1;
+
+    for (let i = 0; i < reelTotalShifts - finalBlockLength; i++) {
+        seq.push(symbolOptions[Math.floor(Math.random() * symbolOptions.length)]);
+    }
+
+    for (let row = config.rows - 1; row >= 0; row--) {
+        seq.push(finalBoard[reel][row]);
+    }
+    seq.push(symbolOptions[Math.floor(Math.random() * symbolOptions.length)]);
+
+    this.spinSequences[reel] = seq;
+  }
+  
+  // Set up sprites (same as before)
   for (let reel = 0; reel < config.reels; reel++) {
     if (!this.symbolSprites[reel]) this.symbolSprites[reel] = [];
     if (this.symbolSprites[reel].length !== config.rows + 1) {
-      console.warn(`MainScene Spin: Correcting sprite length for reel ${reel}`);
       this.symbolSprites[reel].forEach(s => s.destroy()); 
       this.symbolSprites[reel] = [];
       
-      // Create above-screen sprite
       let x_above = startX + reel * reelWidth;
       let y_above = startY - reelHeight;
       let tex_above = this.spinSequences[reel]?.[0] || symbolOptions[0];
@@ -171,7 +184,6 @@ for (let reel = 0; reel < config.reels; reel++) {
         .setDepth(5)
         .setMask(this.compositeMask));
       
-      // Create visible sprites with random symbols initially
       for(let row = 0; row < config.rows; row++) {
         let x = startX + reel * reelWidth;
         let y = startY + row * reelHeight;
@@ -183,7 +195,6 @@ for (let reel = 0; reel < config.reels; reel++) {
       }
     }
     
-    // Set the first symbol in the sequence to the above-screen sprite
     if(this.symbolSprites[reel][0]) {
       this.symbolSprites[reel][0].y = startY - reelHeight;
       let tex = this.spinSequences[reel]?.[0] || symbolOptions[0];
@@ -192,47 +203,41 @@ for (let reel = 0; reel < config.reels; reel++) {
   }
   
   let reelsFinished = 0;
-  const animateReel = (reel, shiftsRemaining) => {
+  const animateReel = (reel, shiftsRemaining, slowdownFactor = 1) => {
     if (shiftsRemaining <= 0) {
       reelsFinished++;
+      this.sound.play('sfx_reel_stop');
+
+      // Check if scatter landed on this reel
+      for (let row = 0; row < config.rows; row++) {
+        if (finalBoard[reel][row] === 'fire') {
+          scattersLanded++;
+          scatterPositions.push({ reel, row });
+          this.sound.play('sfx_scatter_landed');
+
+          
+          // Create scatter glow effect
+          const x = startX + reel * reelWidth;
+          const y = startY + row * reelHeight;
+          this.createScatterGlow(x, y);
+          
+          // Check if we need anticipation mode
+          if (scattersLanded === 2 && reelsFinished < config.reels) {
+            this.enterScatterAnticipation(scatterPositions);
+          }
+        }
+      }
+      
       if (reelsFinished === config.reels) {
-        console.log("MainScene: All reels finished animation.");
+        // Check if we were close to bonus
+        if (scattersLanded === 2) {
+          this.showNearMissEffect();
+        }
         
-        // DEBUG: Verify the final positions
         this.time.delayedCall(100, () => {
           const actualBoard = this.getCurrentBoardState();
-          console.log("FINAL VERIFICATION:");
           console.log("Expected finalBoard:", finalBoard);
           console.log("Actual board:", actualBoard);
-          
-          // Check if we have a perfect match
-          let perfectMatch = true;
-          for (let r = 0; r < config.reels; r++) {
-            for (let row = 0; row < config.rows; row++) {
-              if (actualBoard[r][row] !== finalBoard[r][row]) {
-                console.error(`STILL MISMATCHED [${r}][${row}]: Expected '${finalBoard[r][row]}', Got '${actualBoard[r][row]}'`);
-                perfectMatch = false;
-              }
-            }
-          }
-          
-          if (perfectMatch) {
-            console.log("SUCCESS: Perfect symbol match achieved!");
-          } else {
-            console.error("FAILURE: Symbols still don't match. Force-fixing...");
-            // Force-fix any remaining mismatches
-            for (let r = 0; r < config.reels; r++) {
-              for (let row = 0; row < config.rows; row++) {
-                const spriteIndex = 1 + row;
-                if (this.symbolSprites[r]?.[spriteIndex] && 
-                    this.symbolSprites[r][spriteIndex].texture.key !== finalBoard[r][row]) {
-                  console.log(`Force-fixing [${r}][${row}]: ${this.symbolSprites[r][spriteIndex].texture.key} -> ${finalBoard[r][row]}`);
-                  this.symbolSprites[r][spriteIndex].setTexture(finalBoard[r][row]);
-                }
-              }
-            }
-          }
-          
           this.evaluateWin(finalBoard, outcome);
         });
       }
@@ -240,24 +245,25 @@ for (let reel = 0; reel < config.reels; reel++) {
     }
     
     if(!this.symbolSprites[reel] || this.symbolSprites[reel].length === 0) {
-      console.error(`AnimateReel skip reel ${reel}`);
       animateReel(reel, 0);
       return;
     }
     
+    // Apply slowdown if in anticipation mode
+    const actualInterval = spinInterval * slowdownFactor;
+    
     this.tweens.add({
       targets: this.symbolSprites[reel],
       y: `+=${reelHeight}`,
-      duration: spinInterval,
+      duration: actualInterval,
       ease: 'Linear',
       onComplete: () => {
         let off = this.symbolSprites[reel]?.[this.symbolSprites[reel].length - 1];
         if (!off) {
-          animateReel(reel, shiftsRemaining - 1);
+          animateReel(reel, shiftsRemaining - 1, slowdownFactor);
           return;
         }
         
-        // Get the next symbol from the sequence
         let tex = this.spinSequences[reel]?.shift() || symbolOptions[0];
         off.setTexture(tex)
           .setScale(1)
@@ -266,18 +272,175 @@ for (let reel = 0; reel < config.reels; reel++) {
           .setMask(this.compositeMask);
         off.y = startY - reelHeight;
         
-        // Move the bottom sprite to the top
         this.symbolSprites[reel].pop();
         this.symbolSprites[reel].unshift(off);
-        animateReel(reel, shiftsRemaining - 1);
+        
+        // Add stutter effect if 2 scatters and approaching end
+        if (scattersLanded === 2 && shiftsRemaining <= 5 && reel >= 2) {
+          // Random stutter
+          if (Math.random() < 0.6) {
+            this.time.delayedCall(50, () => {
+              animateReel(reel, shiftsRemaining - 1, slowdownFactor * 1.5);
+            });
+            return;
+          }
+        }
+        
+        animateReel(reel, shiftsRemaining - 1, slowdownFactor);
       },
       callbackScope: this
     });
   };
   
+  // Store animateReel function for scatter anticipation
+  this.currentAnimateReel = animateReel;
+  
   for (let reel = 0; reel < config.reels; reel++) {
-    animateReel(reel, baseTotalShifts + reel * reelDelayFactor);
+    let extraShifts = 0;
+    // Add extra shifts for anticipation on reels 3, 4, 5 (indexes 2, 3, 4)
+    if (this.inAnticipation && reel >= 2) {
+      extraShifts = 150; // Try 25–40 for a visible slow down; tweak as you like!
+    }
+    animateReel(reel, baseTotalShifts + reel * reelDelayFactor + extraShifts);
   }
+  
+  
+  // Track potential big wins for anticipation
+  this.checkForAnticipation(finalBoard, outcome);
+}
+
+// NEW: Check for anticipation moments
+checkForAnticipation(finalBoard, outcome) {
+  // Check if this is a big win or bonus trigger
+  const isBigWin = outcome.type.includes('large') || outcome.type.includes('huge') || 
+                   outcome.type.includes('bonus') || outcome.type.includes('free_spins');
+  
+  if (isBigWin) {
+    // Add anticipation sound when last reel is spinning
+    this.time.delayedCall(2000, () => {
+      if (this.sound.get('bonusSound')) {
+        this.sound.play('bonusSound', { volume: 0.3 });
+      }
+    });
+  }
+}
+
+createScatterGlow(x, y) {
+  // Create pulsing glow effect
+  const glow = this.add.sprite(x, y, 'fire')
+    .setScale(1.2)
+    .setAlpha(0.6)
+    .setDepth(20)
+    .setTint(0xFFAA00);
+  
+  this.tweens.add({
+    targets: glow,
+    scale: 1.5,
+    alpha: 0.3,
+    duration: 800,
+    yoyo: true,
+    repeat: -1,
+    ease: 'Sine.easeInOut'
+  });
+  
+  // Store for cleanup
+  if (!this.scatterGlows) this.scatterGlows = [];
+  this.scatterGlows.push(glow);
+}
+
+enterScatterAnticipation(scatterPositions) {
+  this.inAnticipation = true;
+
+  // Darken the screen except scatters
+  const darkOverlay = this.add.rectangle(640, 360, 1280, 720, 0x000000, 0.5)
+    .setDepth(15);
+  
+    this.anticipationSpotlights = [];
+  
+  // Make scatters shine through
+  scatterPositions.forEach(pos => {
+    const x = 350 + pos.reel * 150;
+    const y = this.reelStartY + pos.row * 150;
+    
+    // Create spotlight effect
+    const spotlight = this.add.circle(x, y, 80, 0xFFFFFF, 0.2)
+      .setDepth(16)
+      .setBlendMode(Phaser.BlendModes.ADD);
+    
+    this.tweens.add({
+      targets: spotlight,
+      scale: { from: 0.8, to: 1.2 },
+      alpha: { from: 0.2, to: 0.4 },
+      duration: 600,
+      yoyo: true,
+      repeat: -1
+    });
+    // STORE IT FOR CLEANUP
+  this.anticipationSpotlights.push(spotlight);
+
+  });
+  
+  // Show "1 MORE!" text
+  const oneMoreText = this.add.text(640, 200, '1 MORE!', {
+    fontSize: '48px',
+    color: '#FFD700',
+    stroke: '#000000',
+    strokeThickness: 4,
+    fontFamily: 'Arial Black'
+  })
+  .setOrigin(0.5)
+  .setDepth(100)
+  .setScale(0);
+  
+  this.tweens.add({
+    targets: oneMoreText,
+    scale: { from: 0, to: 1.2 },
+    duration: 300,
+    ease: 'Back.easeOut',
+    yoyo: true,
+    repeat: -1,
+    hold: 200
+  });
+  
+  // Slow down remaining reels
+  for (let r = 2; r < config.reels; r++) {
+    if (this.symbolSprites[r]) {
+      // Add extra spins to remaining reels
+      if (this.spinSequences[r]) {
+        for (let i = 0; i < 1000; i++) {
+          this.spinSequences[r].unshift(this.outcomeManager.getSymbolIds()
+            .filter(s => s !== 'elsi')[Math.floor(Math.random() * 10)]);
+        }
+      }
+    }
+  }
+  
+  // Store elements for cleanup
+  this.anticipationElements = { darkOverlay, oneMoreText };
+}
+
+showNearMissEffect() {
+  // Clean up anticipation elements
+  if (this.anticipationElements) {
+    Object.values(this.anticipationElements).forEach(el => el?.destroy());
+  }
+  this.sound.play('sfx_near_miss');
+
+  
+  if (this.scatterGlows) {
+    this.scatterGlows.forEach(g => g?.destroy());
+  }
+  
+  // Quick flash effect for near miss
+  const flash = this.add.rectangle(640, 360, 1280, 720, 0xFF6600, 0.3)
+    .setDepth(50);
+  
+  this.tweens.add({
+    targets: flash,
+    alpha: 0,
+    duration: 500,
+    onComplete: () => flash.destroy()
+  });
 }
 
   createInitialReels() {
@@ -359,21 +522,22 @@ for (let reel = 0; reel < config.reels; reel++) {
       console.warn(`MainScene: Spin blocked, state is: ${this.reelState}`); 
       return; 
     }
+    this.cleanupAnticipationEffects();
+    this.inAnticipation = false;
+
     console.log(`MainScene: spin() called with bet ${bet}. State changing to 'spinning'.`);
     this.currentBet = bet;
     this.reelState = 'spinning';
     
-    if (this.sound.get('spinSound')) { 
-      this.sound.play('spinSound'); 
-    } else { 
-      console.warn("MainScene: spinSound not found."); 
-    }
+    this.sound.play('sfx_reel_start');
+
     
     if (this.winLineGraphics) { 
       console.log("MainScene: Clearing win lines."); 
       this.winLineGraphics.clear(); 
     }
-    
+    this.cleanupAnticipationEffects();
+
     this.children.list.slice().forEach(child => { 
       if (child?.getData?.('isWinLabel')) { 
         try { child.destroy(); } catch(e){} 
@@ -400,32 +564,51 @@ for (let reel = 0; reel < config.reels; reel++) {
       case 'no_win':
         return this.generateNoWinBoard();
       
-      case 'small_win_low':
+      // Near misses
+      case 'near_miss_scatter_2':
+        return this.generateNearMissScatterBoard();
+      case 'near_miss_bonus_2':
+        return this.generateNearMissBonusBoard();
+      
+      // Tiny wins
+      case 'tiny_win_2_high':
+        return this.generateTinyWinBoard(['pam_mike', 'grant'], outcome, bet);
+      case 'tiny_win_mixed':
+        return this.generateTinyWinMixedBoard(outcome, bet);
+      
+      // Small wins
+      case 'small_win_3_low':
         return this.generateWinBoard(['j', 'q', 'k', 'a'], 3, outcome, bet);
-      
-      case 'small_win_mid':
+      case 'small_win_3_med':
         return this.generateWinBoard(['beer', 'flag'], 3, outcome, bet);
-      
-      case 'small_win_high':
+      case 'small_win_3_high':
         return this.generateWinBoard(['pam_mike', 'grant', 'logan', 'nick'], 3, outcome, bet);
       
-      case 'medium_win_low':
-        return this.generateWinBoard(['beer', 'flag'], 4, outcome, bet);
+      // Multi-line wins
+      case 'multi_line_small':
+        return this.generateMultiLineBoard(2, 3, outcome, bet);
+      case 'multi_line_mixed':
+        return this.generateMultiLineBoard(3, 4, outcome, bet);
       
-      case 'medium_win_high':
-        return this.generateWinBoard(['pam_mike', 'grant', 'logan', 'nick'], 4, outcome, bet);
+      // Medium wins
+      case 'medium_win_4_any':
+        return this.generateWinBoard(['j', 'q', 'k', 'a', 'beer', 'flag', 'pam_mike', 'grant'], 4, outcome, bet);
+      case 'medium_win_wild':
+        return this.generateWildWinBoard(outcome, bet);
       
-      case 'large_win_low':
-        return this.generateWinBoard(['beer', 'flag'], 5, outcome, bet);
-      
-      case 'large_win_high':
+      // Large wins
+      case 'large_win_5_low':
+        return this.generateWinBoard(['j', 'q', 'k', 'a', 'beer', 'flag'], 5, outcome, bet);
+      case 'large_win_5_high':
         return this.generateWinBoard(['pam_mike', 'grant', 'logan', 'nick'], 5, outcome, bet);
       
-      case 'free_spins_3':
-      case 'free_spins_4':
-      case 'free_spins_5':
-        return this.generateScatterBoard(outcome.scatters);
+      // Scatter pays
+      case 'scatter_pay_2':
+        return this.generateScatterPayBoard(outcome.scatters);
       
+      // Bonus triggers
+      case 'free_spins_trigger':
+        return this.generateScatterBoard(3);
       case 'puppy_bonus_3':
       case 'puppy_bonus_4':
       case 'puppy_bonus_5':
@@ -445,17 +628,21 @@ for (let reel = 0; reel < config.reels; reel++) {
   // NEW METHOD: Generate no-win board
   generateNoWinBoard() {
     const board = this.createEmptyBoard();
-    const symbols = this.outcomeManager.getSymbolIds().filter(s => s !== 'fire' && s !== 'elsi' && s !== 'loon');
+    const symbols = this.outcomeManager.getSymbolIds().filter(s => s !== 'fire' && s !== 'elsi');
     
-    // Ensure no winning combinations exist
+    // Include wilds occasionally but ensure no wins
     for (let r = 0; r < config.reels; r++) {
       const usedInReel = [];
       for (let row = 0; row < config.rows; row++) {
-        // Pick symbols that don't create lines
         let symbol;
-        do {
-          symbol = symbols[Math.floor(Math.random() * symbols.length)];
-        } while (usedInReel.includes(symbol) && usedInReel.length < symbols.length);
+        // 3% chance for wild in no-win boards
+        if (Math.random() < 0.03 && r > 0) { // No wilds on reel 0 to prevent wild lines
+          symbol = 'loon';
+        } else {
+          do {
+            symbol = symbols[Math.floor(Math.random() * symbols.length)];
+          } while (usedInReel.includes(symbol) && usedInReel.length < symbols.length - 1);
+        }
         
         board[r][row] = symbol;
         usedInReel.push(symbol);
@@ -463,9 +650,9 @@ for (let reel = 0; reel < config.reels; reel++) {
     }
     
     // Verify no accidental wins
-    const wins = this.evaluateWins(board, 1);
+    const wins = this.evaluateWins(board, this.currentBet);
     if (wins.totalWin > 0) {
-      // If we accidentally created a win, try again (with recursion limit)
+      // If we accidentally created a win, try again
       return this.generateNoWinBoard();
     }
     
@@ -474,7 +661,18 @@ for (let reel = 0; reel < config.reels; reel++) {
 
   // NEW METHOD: Generate winning board
   generateWinBoard(symbolPool, matchLength, outcome, bet) {
-    const board = this.generateRandomBoard();
+    // Start with controlled board
+    const board = this.createEmptyBoard();
+    const symbols = this.outcomeManager.getSymbolIds().filter(s => s !== 'fire' && s !== 'elsi' && s !== 'loon');
+    
+    // Fill with non-winning symbols
+    for (let r = 0; r < config.reels; r++) {
+      for (let row = 0; row < config.rows; row++) {
+        board[r][row] = symbols[Math.floor(Math.random() * symbols.length)];
+      }
+    }
+    
+    // Place the intended win
     const targetPayline = config.paylinesDefinition[Math.floor(Math.random() * config.paylinesDefinition.length)];
     const symbol = symbolPool[Math.floor(Math.random() * symbolPool.length)];
     
@@ -484,12 +682,28 @@ for (let reel = 0; reel < config.reels; reel++) {
       board[reel][row] = symbol;
     }
     
-    // Add wilds occasionally for higher outcomes
-    if (outcome.rtp > 1.0 && Math.random() < 0.3) {
-      const wildPositions = Math.min(2, Math.floor(Math.random() * matchLength));
-      for (let i = 0; i < wildPositions; i++) {
-        const [reel, row] = targetPayline[i];
-        board[reel][row] = 'loon';
+    // Add wilds occasionally for higher outcomes (but controlled)
+    if (outcome.rtp > 1.0 && Math.random() < 0.3 && matchLength < 5) {
+      const wildPosition = Math.floor(Math.random() * matchLength);
+      const [reel, row] = targetPayline[wildPosition];
+      board[reel][row] = 'loon';
+    }
+    
+    // Ensure no extension beyond intended length
+    if (matchLength < 5) {
+      const [nextReel, nextRow] = targetPayline[matchLength];
+      const otherSymbols = symbols.filter(s => s !== symbol);
+      board[nextReel][nextRow] = otherSymbols[Math.floor(Math.random() * otherSymbols.length)];
+    }
+    
+    // Verify win is within expected range
+    const wins = this.evaluateWins(board, bet);
+    const winMultiplier = wins.totalWin / bet;
+    
+    if (outcome.minWin && outcome.maxWin) {
+      if (winMultiplier < outcome.minWin || winMultiplier > outcome.maxWin) {
+        // Try again if outside range
+        return this.generateWinBoard(symbolPool, matchLength, outcome, bet);
       }
     }
     
@@ -502,31 +716,55 @@ for (let reel = 0; reel < config.reels; reel++) {
     const symbols = this.outcomeManager.getSymbolIds().filter(s => s !== 'fire' && s !== 'elsi');
     
     for (let r = 0; r < config.reels; r++) {
+      let hasScatterOnReel = false;
       for (let row = 0; row < config.rows; row++) {
-        board[r][row] = symbols[Math.floor(Math.random() * symbols.length)];
+        // 5% chance for wild in random boards
+        if (Math.random() < 0.05) {
+          board[r][row] = 'loon';
+        } else {
+          // Very rare chance for scatter (0.5%) but max 1 per reel
+          if (Math.random() < 0.005 && !hasScatterOnReel) {
+            board[r][row] = 'fire';
+            hasScatterOnReel = true;
+          } else {
+            board[r][row] = symbols[Math.floor(Math.random() * symbols.length)];
+          }
+        }
       }
     }
     return board;
   }
 
   // NEW METHOD: Generate scatter board
-  generateScatterBoard(scatterCount) {
-    const board = this.generateRandomBoard();
-    let placed = 0;
-    
-    // Place scatters randomly across the board
-    while (placed < scatterCount) {
-      const reel = Math.floor(Math.random() * config.reels);
-      const row = Math.floor(Math.random() * config.rows);
-      
-      if (board[reel][row] !== 'fire') {
-        board[reel][row] = 'fire';
-        placed++;
+  // NEW METHOD: Generate scatter board
+generateScatterBoard(scatterCount) {
+  const board = this.generateRandomBoard();
+  
+  // Clear any scatters that may have been randomly placed
+  for (let r = 0; r < config.reels; r++) {
+    for (let row = 0; row < config.rows; row++) {
+      if (board[r][row] === 'fire') {
+        const symbols = this.outcomeManager.getSymbolIds().filter(s => s !== 'fire' && s !== 'elsi');
+        board[r][row] = symbols[Math.floor(Math.random() * symbols.length)];
       }
     }
-    
-    return board;
   }
+  
+  // Now place scatters correctly (one per reel max)
+  const reels = [0, 1, 2, 3, 4];
+  for (let i = reels.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [reels[i], reels[j]] = [reels[j], reels[i]];
+  }
+  
+  for (let i = 0; i < scatterCount; i++) {
+    const reel = reels[i];
+    const row = Math.floor(Math.random() * config.rows);
+    board[reel][row] = 'fire';
+  }
+  
+  return board;
+}
 
   // NEW METHOD: Generate bonus board
   generateBonusBoard(bonusCount) {
@@ -542,14 +780,306 @@ for (let reel = 0; reel < config.reels; reel++) {
     return board;
   }
 
+  // NEW: Generate near miss scatter board
+  generateNearMissScatterBoard() {
+    const board = this.generateRandomBoard();
+    
+    // Place exactly 2 scatters on different reels
+    const reels = [0, 1, 2, 3, 4];
+    // Shuffle reels array
+    for (let i = reels.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [reels[i], reels[j]] = [reels[j], reels[i]];
+    }
+    
+    // Take first 2 reels for scatter placement
+    for (let i = 0; i < 2; i++) {
+      const reel = reels[i];
+      const row = Math.floor(Math.random() * config.rows);
+      
+      // Clear any existing scatters on this reel first
+      for (let r = 0; r < config.rows; r++) {
+        if (board[reel][r] === 'fire') {
+          const symbols = this.outcomeManager.getSymbolIds().filter(s => s !== 'fire' && s !== 'elsi');
+          board[reel][r] = symbols[Math.floor(Math.random() * symbols.length)];
+        }
+      }
+      
+      // Place the scatter
+      board[reel][row] = 'fire';
+    }
+    
+    return board;
+  }
+
+  // NEW: Generate near miss bonus board
+  generateNearMissBonusBoard() {
+    const board = this.generateRandomBoard();
+    const payline = config.paylinesDefinition[Math.floor(Math.random() * config.paylinesDefinition.length)];
+    
+    // Place exactly 2 bonus symbols on first 2 positions of a payline
+    board[payline[0][0]][payline[0][1]] = 'elsi';
+    board[payline[1][0]][payline[1][1]] = 'elsi';
+    
+    // Make sure the 3rd position is NOT a bonus symbol
+    if (board[payline[2][0]][payline[2][1]] === 'elsi') {
+      const symbols = this.outcomeManager.getSymbolIds().filter(s => s !== 'fire' && s !== 'elsi');
+      board[payline[2][0]][payline[2][1]] = symbols[Math.floor(Math.random() * symbols.length)];
+    }
+    
+    return board;
+  }
+
+  // NEW: Generate tiny win board (2 symbols)
+  generateTinyWinBoard(symbolPool, outcome, bet) {
+    // Start with empty board to have full control
+    const board = this.createEmptyBoard();
+    const symbols = this.outcomeManager.getSymbolIds().filter(s => s !== 'fire' && s !== 'elsi' && s !== 'loon');
+    
+    // Fill board with non-winning symbols first
+    for (let r = 0; r < config.reels; r++) {
+      for (let row = 0; row < config.rows; row++) {
+        board[r][row] = symbols[Math.floor(Math.random() * symbols.length)];
+      }
+    }
+    
+    // Now place our intended tiny win
+    const targetPayline = config.paylinesDefinition[Math.floor(Math.random() * config.paylinesDefinition.length)];
+    const symbol = symbolPool[Math.floor(Math.random() * symbolPool.length)];
+    
+    // Place only 2 matching symbols
+    board[targetPayline[0][0]][targetPayline[0][1]] = symbol;
+    board[targetPayline[1][0]][targetPayline[1][1]] = symbol;
+    
+    // Ensure 3rd position is different to prevent extending the win
+    const otherSymbols = symbols.filter(s => s !== symbol);
+    board[targetPayline[2][0]][targetPayline[2][1]] = otherSymbols[Math.floor(Math.random() * otherSymbols.length)];
+    
+    // Verify the win is within expected range
+    const wins = this.evaluateWins(board, bet);
+    const winMultiplier = wins.totalWin / bet;
+    
+    if (winMultiplier < outcome.minWin || winMultiplier > outcome.maxWin) {
+      // Try again if win is outside expected range
+      return this.generateTinyWinBoard(symbolPool, outcome, bet);
+    }
+    
+    return board;
+  }
+
+  // NEW: Generate tiny win with mixed symbols and wild
+  generateTinyWinMixedBoard(outcome, bet) {
+    // Start with empty board to have full control
+    const board = this.createEmptyBoard();
+    const symbols = this.outcomeManager.getSymbolIds().filter(s => s !== 'fire' && s !== 'elsi' && s !== 'loon');
+    
+    // Fill board with non-winning symbols first
+    for (let r = 0; r < config.reels; r++) {
+      for (let row = 0; row < config.rows; row++) {
+        board[r][row] = symbols[Math.floor(Math.random() * symbols.length)];
+      }
+    }
+    
+    // Pick a high value symbol and a payline
+    const highSymbols = ['pam_mike', 'grant'];
+    const symbol = highSymbols[Math.floor(Math.random() * highSymbols.length)];
+    const targetPayline = config.paylinesDefinition[Math.floor(Math.random() * config.paylinesDefinition.length)];
+    
+    // Place 1 symbol and 1 wild to make 2-of-a-kind
+    board[targetPayline[0][0]][targetPayline[0][1]] = symbol;
+    board[targetPayline[1][0]][targetPayline[1][1]] = 'loon';
+    
+    // Ensure 3rd position is different and not a wild
+    const otherSymbols = symbols.filter(s => s !== symbol);
+    board[targetPayline[2][0]][targetPayline[2][1]] = otherSymbols[Math.floor(Math.random() * otherSymbols.length)];
+    
+    // Make sure no other symbols on this payline can extend the win
+    for (let i = 3; i < targetPayline.length; i++) {
+      const [r, row] = targetPayline[i];
+      if (board[r][row] === symbol || board[r][row] === 'loon') {
+        board[r][row] = otherSymbols[Math.floor(Math.random() * otherSymbols.length)];
+      }
+    }
+    
+    // Verify the win is within expected range
+    const wins = this.evaluateWins(board, bet);
+    const winMultiplier = wins.totalWin / bet;
+    
+    if (winMultiplier < outcome.minWin || winMultiplier > outcome.maxWin) {
+      // Try again if win is outside expected range
+      return this.generateTinyWinMixedBoard(outcome, bet);
+    }
+    
+    return board;
+  }
+
+  // NEW: Generate multi-line win board
+  generateMultiLineBoard(minLines, maxLines, outcome, bet) {
+    // Start with controlled board
+    const board = this.createEmptyBoard();
+    const symbols = this.outcomeManager.getSymbolIds().filter(s => s !== 'fire' && s !== 'elsi' && s !== 'loon');
+    
+    // Fill with non-winning symbols
+    for (let r = 0; r < config.reels; r++) {
+      for (let row = 0; row < config.rows; row++) {
+        board[r][row] = symbols[Math.floor(Math.random() * symbols.length)];
+      }
+    }
+    
+    const numLines = Math.floor(Math.random() * (maxLines - minLines + 1)) + minLines;
+    const usedPaylines = [];
+    
+    // Select random paylines
+    const availablePaylines = [...Array(config.paylinesDefinition.length).keys()];
+    for (let i = 0; i < numLines && availablePaylines.length > 0; i++) {
+      const idx = Math.floor(Math.random() * availablePaylines.length);
+      usedPaylines.push(availablePaylines[idx]);
+      availablePaylines.splice(idx, 1);
+    }
+    
+    // Create wins on selected paylines
+    for (const paylineIdx of usedPaylines) {
+      const payline = config.paylinesDefinition[paylineIdx];
+      const symbolPool = i => {
+        if (i === 0) return ['j', 'q', 'k', 'a']; // Low symbols for first line
+        if (i === 1) return ['beer', 'flag']; // Medium for second
+        return ['pam_mike', 'grant', 'logan', 'nick']; // High for third+
+      };
+      
+      const symbolsToUse = symbolPool(usedPaylines.indexOf(paylineIdx));
+      const symbol = symbolsToUse[Math.floor(Math.random() * symbolsToUse.length)];
+      const matchCount = Math.random() < 0.7 ? 3 : 4;
+      
+      for (let i = 0; i < matchCount; i++) {
+        board[payline[i][0]][payline[i][1]] = symbol;
+      }
+      
+      // Ensure win doesn't extend
+      if (matchCount < 5) {
+        const [nextReel, nextRow] = payline[matchCount];
+        const otherSymbols = symbols.filter(s => s !== symbol);
+        board[nextReel][nextRow] = otherSymbols[Math.floor(Math.random() * otherSymbols.length)];
+      }
+    }
+    
+    // Verify win is within expected range
+    const wins = this.evaluateWins(board, bet);
+    const winMultiplier = wins.totalWin / bet;
+    
+    if (winMultiplier < outcome.minWin || winMultiplier > outcome.maxWin) {
+      // Try again if outside range
+      return this.generateMultiLineBoard(minLines, maxLines, outcome, bet);
+    }
+    
+    return board;
+  }
+
+  // NEW: Generate wild win board
+  generateWildWinBoard(outcome, bet) {
+    // Start with controlled board
+    const board = this.createEmptyBoard();
+    const symbols = this.outcomeManager.getSymbolIds().filter(s => s !== 'fire' && s !== 'elsi' && s !== 'loon');
+    
+    // Fill with non-winning symbols
+    for (let r = 0; r < config.reels; r++) {
+      for (let row = 0; row < config.rows; row++) {
+        board[r][row] = symbols[Math.floor(Math.random() * symbols.length)];
+      }
+    }
+    
+    // Pick a symbol and create a win with wild substitution
+    const winSymbols = ['beer', 'flag', 'pam_mike', 'grant', 'logan', 'nick'];
+    const symbol = winSymbols[Math.floor(Math.random() * winSymbols.length)];
+    const targetPayline = config.paylinesDefinition[Math.floor(Math.random() * config.paylinesDefinition.length)];
+    
+    // Decide on 3 or 4 symbol win
+    const baseCount = Math.random() < 0.6 ? 3 : 4;
+    
+    // Place symbols with exactly one wild
+    const wildPosition = Math.floor(Math.random() * baseCount);
+    for (let i = 0; i < baseCount; i++) {
+      if (i === wildPosition) {
+        board[targetPayline[i][0]][targetPayline[i][1]] = 'loon';
+      } else {
+        board[targetPayline[i][0]][targetPayline[i][1]] = symbol;
+      }
+    }
+    
+    // Ensure win doesn't extend beyond intended length
+    if (baseCount < 5) {
+      const [nextReel, nextRow] = targetPayline[baseCount];
+      const otherSymbols = symbols.filter(s => s !== symbol);
+      board[nextReel][nextRow] = otherSymbols[Math.floor(Math.random() * otherSymbols.length)];
+    }
+    
+    // Verify win is within expected range
+    const wins = this.evaluateWins(board, bet);
+    const winMultiplier = wins.totalWin / bet;
+    
+    if (winMultiplier < outcome.minWin || winMultiplier > outcome.maxWin) {
+      // Try again if outside range
+      return this.generateWildWinBoard(outcome, bet);
+    }
+    
+    return board;
+  }
+
+  // NEW: Generate scatter pay board (no bonus trigger)
+  generateScatterPayBoard(scatterCount) {
+    const board = this.generateRandomBoard();
+    
+    // Ensure we don't try to place more scatters than reels
+    scatterCount = Math.min(scatterCount, config.reels);
+    
+    // Select random reels for scatter placement
+    const reels = [0, 1, 2, 3, 4];
+    // Shuffle reels array
+    for (let i = reels.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [reels[i], reels[j]] = [reels[j], reels[i]];
+    }
+    
+    // Place one scatter on each selected reel
+    for (let i = 0; i < scatterCount; i++) {
+      const reel = reels[i];
+      const row = Math.floor(Math.random() * config.rows);
+      
+      // Clear any existing scatters on this reel first
+      for (let r = 0; r < config.rows; r++) {
+        if (board[reel][r] === 'fire') {
+          const symbols = this.outcomeManager.getSymbolIds().filter(s => s !== 'fire' && s !== 'elsi');
+          board[reel][r] = symbols[Math.floor(Math.random() * symbols.length)];
+        }
+      }
+      
+      // Place the scatter
+      board[reel][row] = 'fire';
+    }
+    
+    return board;
+  }
+
+
+
+
   generateSpinResult() {
     const result = []; const symbolOptions = config.symbols.map(s => s.id).concat([config.wild?.id, config.scatter?.id, config.bonus?.id]).filter(Boolean); const regularSymbols = config.symbols.map(s => s.id).concat([config.wild?.id]).filter(Boolean); const scatterId = config.scatter?.id; const bonusId = config.bonus?.id; for (let reel = 0; reel < config.reels; reel++) { result[reel] = []; let hasScatter = false; let hasBonus = false; for (let row = 0; row < config.rows; row++) { let chosenSymbol; let validSymbol = false; let attempts = 0; while (!validSymbol && attempts < 20) { chosenSymbol = symbolOptions[Math.floor(Math.random() * symbolOptions.length)]; if (chosenSymbol === scatterId) { if (!hasScatter) { validSymbol = true; hasScatter = true; } else { chosenSymbol = regularSymbols[Math.floor(Math.random() * regularSymbols.length)]; validSymbol = true; } } else if (chosenSymbol === bonusId) { if (!hasBonus) { validSymbol = true; hasBonus = true; } else { chosenSymbol = regularSymbols[Math.floor(Math.random() * regularSymbols.length)]; validSymbol = true; } } else { validSymbol = true; } attempts++; } if (!validSymbol) { chosenSymbol = regularSymbols[Math.floor(Math.random() * regularSymbols.length)]; console.warn(`SpinResult fallback r${reel}`); } result[reel][row] = chosenSymbol; } } return result;
   }
 
   evaluateWin(finalBoard, outcome) {
     // Using Puppy Bonus names here
-    if (this.reelState !== 'spinning') { console.warn(`MainScene: evaluateWin called state: ${this.reelState}.`); if (this.reelState !== 'bonus') { this.reelState = 'idle'; this.resetUISceneSpinningFlag(); } return; }
-    this.reelState = 'evaluation';// DEBUG: Log what we think the board should be
+    if (this.reelState !== 'spinning') { 
+      console.warn(`MainScene: evaluateWin called state: ${this.reelState}.`); 
+      if (this.reelState !== 'bonus') { 
+        this.reelState = 'idle'; 
+        this.resetUISceneSpinningFlag(); 
+      } 
+      return; 
+    }
+    
+    this.reelState = 'evaluation';
+    
+    // DEBUG: Log what we think the board should be
     console.log("=== BOARD DEBUG ===");
     console.log("Expected finalBoard:", finalBoard);
     
@@ -565,7 +1095,72 @@ for (let reel = 0; reel < config.reels; reel++) {
         }
       }
     }
-    console.log("=== END BOARD DEBUG ==="); console.log("MainScene: evaluateWin() -> 'evaluation'.");  console.log("MainScene: Final board:", finalBoard); console.log("MainScene: Outcome:", outcome);const { totalWin, winningLines } = this.evaluateWins(finalBoard); const bonusInfo = this.checkBonusTriggers(finalBoard); console.log("MainScene: Bonus check results:", bonusInfo); let bonusLaunched = false; if (bonusInfo.freeSpins) { bonusLaunched = true; console.log(`MainScene: FS Trigger! Count: ${bonusInfo.freeSpinsCount}`); if (this.sound.get('bonusSound')) this.sound.play('bonusSound'); this.showFreeSpinsMessage(bonusInfo.freeSpinsCount); this.time.delayedCall(2000, () => { this.launchFreeSpins(bonusInfo.freeSpinsCount); }); } else if (bonusInfo.puppyBonus) { bonusLaunched = true; console.log(`MainScene: Puppy Bonus Trigger! Picks: ${bonusInfo.puppyBonusPicks}`); if (this.sound.get('bonusSound')) this.sound.play('bonusSound'); this.showPuppyBonusMessage(bonusInfo.puppyBonusPicks); this.time.delayedCall(2000, () => { this.launchPuppyBonus(bonusInfo.puppyBonusPicks); }); } if (!bonusLaunched) { if (winningLines.length > 0) { console.log(`MainScene: Win! Amount: ${totalWin}.`); this.showWinningLines(winningLines); if (this.sound.get('winSound')) { this.sound.play('winSound'); } else { console.warn("MainScene: winSound not loaded."); } this.events.emit('win', { amount: totalWin, lines: winningLines }); const winDisplayDuration = 1000; console.log(`MainScene: Scheduling state idle in ${winDisplayDuration}ms.`); this.time.delayedCall(winDisplayDuration, () => { if (this.reelState === 'evaluation') { this.reelState = 'idle'; console.log("MainScene: State -> 'idle' after win delay."); this.resetUISceneSpinningFlag(); } else { console.log("MainScene: State wrong in win delay callback."); } }, [], this); } else { console.log("MainScene: No win."); this.events.emit('win', { amount: 0 }); this.reelState = 'idle'; console.log("MainScene: State -> 'idle' (no win)."); this.resetUISceneSpinningFlag(); } } else { console.log("MainScene: Bonus launched."); }
+    console.log("=== END BOARD DEBUG ==="); 
+    console.log("MainScene: evaluateWin() -> 'evaluation'."); 
+    console.log("MainScene: Final board:", finalBoard); 
+    console.log("MainScene: Outcome:", outcome);
+    
+    const { totalWin, winningLines } = this.evaluateWins(finalBoard); 
+    const bonusInfo = this.checkBonusTriggers(finalBoard, outcome); 
+    console.log("MainScene: Bonus check results:", bonusInfo); 
+    
+    let bonusLaunched = false;
+    
+    if (bonusInfo.freeSpins) { 
+      bonusLaunched = true; 
+      console.log(`MainScene: FS Trigger! Count: ${bonusInfo.freeSpinsCount}`); 
+      
+      // Clean up anticipation effects before launching bonus
+      this.cleanupAnticipationEffects();
+      
+      if (this.sound.get('bonusSound')) this.sound.play('bonusSound'); 
+      this.showFreeSpinsMessage(bonusInfo.freeSpinsCount); 
+      this.time.delayedCall(2000, () => { 
+        this.launchFreeSpins(bonusInfo.freeSpinsCount); 
+      }); 
+    } else if (bonusInfo.puppyBonus) { 
+      bonusLaunched = true; 
+      console.log(`MainScene: Puppy Bonus Trigger! Picks: ${bonusInfo.puppyBonusPicks}`);
+      
+      // Clean up anticipation effects before launching bonus
+      this.cleanupAnticipationEffects();
+      
+      if (this.sound.get('bonusSound')) this.sound.play('bonusSound'); 
+      this.showPuppyBonusMessage(bonusInfo.puppyBonusPicks); 
+      this.time.delayedCall(2000, () => { 
+        this.launchPuppyBonus(bonusInfo.puppyBonusPicks); 
+      }); 
+    } 
+    
+    if (!bonusLaunched) { 
+      if (winningLines.length > 0) { 
+        console.log(`MainScene: Win! Amount: ${totalWin}.`); 
+
+        this.showWinningLines(winningLines); 
+        this.sound.play('sfx_win_small');
+
+        this.events.emit('win', { amount: totalWin, lines: winningLines }); 
+        const winDisplayDuration = 1000; 
+        console.log(`MainScene: Scheduling state idle in ${winDisplayDuration}ms.`); 
+        this.time.delayedCall(winDisplayDuration, () => { 
+          if (this.reelState === 'evaluation') { 
+            this.reelState = 'idle'; 
+            console.log("MainScene: State -> 'idle' after win delay."); 
+            this.resetUISceneSpinningFlag(); 
+          } else { 
+            console.log("MainScene: State wrong in win delay callback."); 
+          } 
+        }, [], this); 
+      } else { 
+        console.log("MainScene: No win."); 
+        this.events.emit('win', { amount: 0 }); 
+        this.reelState = 'idle'; 
+        console.log("MainScene: State -> 'idle' (no win)."); 
+        this.resetUISceneSpinningFlag(); 
+      } 
+    } else { 
+      console.log("MainScene: Bonus launched."); 
+    }
   }
 
   getCurrentBoardState() {
@@ -573,15 +1168,171 @@ for (let reel = 0; reel < config.reels; reel++) {
   }
 
   evaluateWins(boardState) {
-    // ... (evaluateWins logic remains the same as previously provided) ...
-    const paylines = config.paylinesDefinition || [ [[0,1],[1,1],[2,1],[3,1],[4,1]],[[0,0],[1,0],[2,0],[3,0],[4,0]],[[0,2],[1,2],[2,2],[3,2],[4,2]],[[0,0],[1,1],[2,2],[3,1],[4,0]],[[0,2],[1,1],[2,0],[3,1],[4,2]],[[0,0],[1,2],[2,0],[3,2],[4,0]],[[0,2],[1,0],[2,2],[3,0],[4,2]],[[0,0],[1,2],[2,1],[3,2],[4,0]],[[0,2],[1,0],[2,1],[3,0],[4,2]] ]; let totalWin = 0; let winningLines = []; const wildSymbolKey = config.wild?.id; const scatterSymbolKey = config.scatter?.id; const bonusSymbolKey = config.bonus?.id; for (let lineIndex = 0; lineIndex < paylines.length; lineIndex++) { const lineCoordinates = paylines[lineIndex]; const lineSymbols = []; const linePositions = []; for (const pos of lineCoordinates) { const [r,w] = pos; if (boardState[r]?.[w]!==undefined) { lineSymbols.push(boardState[r][w]); linePositions.push(pos); } else { lineSymbols.push(null); linePositions.push(pos); } } if (lineSymbols.length === 0 || lineSymbols[0] === null || lineSymbols[0] === scatterSymbolKey || lineSymbols[0] === bonusSymbolKey) continue; let firstSymbol = lineSymbols[0]; let matchCount = 0; let effectiveSymbol = firstSymbol; for (let i = 0; i < lineSymbols.length; i++) { const currentSymbol = lineSymbols[i]; if (i === 0) { if (currentSymbol === wildSymbolKey) { matchCount++; for (let j = 1; j < lineSymbols.length; j++) { if (lineSymbols[j] !== wildSymbolKey && lineSymbols[j] !== scatterSymbolKey && lineSymbols[j] !== bonusSymbolKey) { effectiveSymbol = lineSymbols[j]; break; } } if (effectiveSymbol === wildSymbolKey) { effectiveSymbol = wildSymbolKey; /* All wilds */ } } else { matchCount++; effectiveSymbol = currentSymbol; } } else { if (currentSymbol === effectiveSymbol || currentSymbol === wildSymbolKey) { matchCount++; } else { break; } } } const minMatch = 3; if (matchCount >= minMatch) { let symbolPay = 0; const symbolConfig = effectiveSymbol === wildSymbolKey ? config.wild : config.symbols.find(s => s.id === effectiveSymbol); if (symbolConfig?.pays?.[matchCount]) { symbolPay = symbolConfig.pays[matchCount]; } else if(effectiveSymbol === wildSymbolKey && !symbolConfig?.pays) { console.warn(`No explicit payout for ${matchCount}x WILD. Check config.`); symbolPay = 0; } else { console.warn(`No payout for ${matchCount}x ${effectiveSymbol}`); } const betPerLine = this.currentBet / (config.paylines || 9); const lineWin = symbolPay * betPerLine; if (lineWin > 0) { totalWin += lineWin; winningLines.push({ lineIndex: lineIndex, symbolPositions: linePositions.slice(0, matchCount), symbol: effectiveSymbol, winAmount: lineWin, count: matchCount }); } } } let scatterCount = 0; let scatterPositions = []; for (let r = 0; r < config.reels; r++) { for (let w = 0; w < config.rows; w++) { if (boardState[r]?.[w] === scatterSymbolKey) { scatterCount++; scatterPositions.push([r, w]); } } } const minScatter = 3; if (scatterCount >= minScatter && config.scatter?.pays?.[scatterCount]) { let scatterPay = config.scatter.pays[scatterCount]; const scatterWinAmount = scatterPay * this.currentBet; if (scatterWinAmount > 0) { totalWin += scatterWinAmount; winningLines.push({ lineIndex: -1, symbolPositions: scatterPositions, symbol: scatterSymbolKey, winAmount: scatterWinAmount, count: scatterCount }); } } return { totalWin, winningLines };
+    const paylines = config.paylinesDefinition || [];
+    let totalWin = 0;
+    let winningLines = [];
+    const wildSymbolKey = config.wild?.id;
+    const scatterSymbolKey = config.scatter?.id;
+    const bonusSymbolKey = config.bonus?.id;
+    
+    // Check each payline for wins
+    for (let lineIndex = 0; lineIndex < paylines.length; lineIndex++) {
+      const lineCoordinates = paylines[lineIndex];
+      const lineSymbols = [];
+      const linePositions = [];
+      
+      for (const pos of lineCoordinates) {
+        const [r,w] = pos;
+        if (boardState[r]?.[w] !== undefined) {
+          lineSymbols.push(boardState[r][w]);
+          linePositions.push(pos);
+        } else {
+          lineSymbols.push(null);
+          linePositions.push(pos);
+        }
+      }
+      
+      if (lineSymbols.length === 0 || lineSymbols[0] === null || lineSymbols[0] === scatterSymbolKey || lineSymbols[0] === bonusSymbolKey) continue;
+      
+      let firstSymbol = lineSymbols[0];
+      let matchCount = 0;
+      let effectiveSymbol = firstSymbol;
+      
+      for (let i = 0; i < lineSymbols.length; i++) {
+        const currentSymbol = lineSymbols[i];
+        
+        if (i === 0) {
+          if (currentSymbol === wildSymbolKey) {
+            matchCount++;
+            // Look for first non-wild to determine line type
+            for (let j = 1; j < lineSymbols.length; j++) {
+              if (lineSymbols[j] !== wildSymbolKey && lineSymbols[j] !== scatterSymbolKey && lineSymbols[j] !== bonusSymbolKey) {
+                effectiveSymbol = lineSymbols[j];
+                break;
+              }
+            }
+            if (effectiveSymbol === wildSymbolKey) {
+              effectiveSymbol = wildSymbolKey; // All wilds
+            }
+          } else {
+            matchCount++;
+            effectiveSymbol = currentSymbol;
+          }
+        } else {
+          if (currentSymbol === effectiveSymbol || currentSymbol === wildSymbolKey) {
+            matchCount++;
+          } else {
+            break;
+          }
+        }
+      }
+      
+      // Check for wins (now including 2-symbol wins for high symbols)
+      const symbolConfig = effectiveSymbol === wildSymbolKey ? config.wild : config.symbols.find(s => s.id === effectiveSymbol);
+      
+      if (symbolConfig?.pays?.[matchCount]) {
+        const symbolPay = symbolConfig.pays[matchCount];
+        const betPerLine = this.currentBet / (config.paylines || 9);
+        const lineWin = symbolPay * betPerLine;
+        
+        if (lineWin > 0) {
+          totalWin += lineWin;
+          winningLines.push({
+            lineIndex: lineIndex,
+            symbolPositions: linePositions.slice(0, matchCount),
+            symbol: effectiveSymbol,
+            winAmount: lineWin,
+            count: matchCount
+          });
+        }
+      }
+    }
+    
+    // Check for scatter pays
+    let scatterCount = 0;
+    let scatterPositions = [];
+    for (let r = 0; r < config.reels; r++) {
+      for (let w = 0; w < config.rows; w++) {
+        if (boardState[r]?.[w] === scatterSymbolKey) {
+          scatterCount++;
+          scatterPositions.push([r, w]);
+        }
+      }
+    }
+    
+    // Scatter pays (including 2 scatters now)
+    if (scatterCount >= 2 && config.scatter?.pays?.[scatterCount]) {
+      let scatterPay = config.scatter.pays[scatterCount];
+      const scatterWinAmount = scatterPay * this.currentBet;
+      
+      if (scatterWinAmount > 0) {
+        totalWin += scatterWinAmount;
+        winningLines.push({
+          lineIndex: -1,
+          symbolPositions: scatterPositions,
+          symbol: scatterSymbolKey,
+          winAmount: scatterWinAmount,
+          count: scatterCount
+        });
+      }
+    }
+    
+    return { totalWin, winningLines };
   }
 
-  checkBonusTriggers(boardState) {
-    // ... (checkBonusTriggers logic remains the same as previously provided, using Puppy Bonus name for result property) ...
-     const scatterId = config.scatter?.id; const bonusId = config.bonus?.id; const freeSpinsTriggerCount = config.freeSpins?.triggerCount || 3; const puppyBonusTriggerCount = config.puppyBonus?.triggerCount || 3;
-     let scatterCount = 0; for (let r = 0; r < config.reels; r++) { for (let w = 0; w < config.rows; w++) { if (boardState[r]?.[w] === scatterId) scatterCount++; } } const freeSpinsAwarded = config.freeSpins?.awards[scatterCount] || 0; const paylines = config.paylinesDefinition || [ [[0,1],[1,1],[2,1],[3,1],[4,1]],[[0,0],[1,0],[2,0],[3,0],[4,0]],[[0,2],[1,2],[2,2],[3,2],[4,2]],[[0,0],[1,1],[2,2],[3,1],[4,0]],[[0,2],[1,1],[2,0],[3,1],[4,2]],[[0,0],[1,2],[2,0],[3,2],[4,0]],[[0,2],[1,0],[2,2],[3,0],[4,2]],[[0,0],[1,2],[2,1],[3,2],[4,0]],[[0,2],[1,0],[2,1],[3,0],[4,2]] ]; let maxBonusOnLine = 0; for (const line of paylines) { let bonusOnThisLine = 0; let lineMatch = true; for (let i = 0; i < line.length; i++) { const [r,w] = line[i]; if (boardState[r]?.[w] === bonusId) { if(lineMatch) bonusOnThisLine++; } else { lineMatch = false; if (i < puppyBonusTriggerCount) break; } } if (bonusOnThisLine >= puppyBonusTriggerCount) {
-      maxBonusOnLine = Math.max(maxBonusOnLine, bonusOnThisLine); } } const puppyBonusPicks = maxBonusOnLine; return { freeSpins: scatterCount >= freeSpinsTriggerCount, freeSpinsCount: freeSpinsAwarded, puppyBonus: maxBonusOnLine >= puppyBonusTriggerCount, puppyBonusPicks: puppyBonusPicks };
+  checkBonusTriggers(boardState, outcome) {
+    const scatterId = config.scatter?.id;
+    const bonusId = config.bonus?.id;
+    const freeSpinsTriggerCount = config.freeSpins?.triggerCount || 3;
+    const puppyBonusTriggerCount = config.puppyBonus?.triggerCount || 3;
+    
+    // Count scatters
+    let scatterCount = 0;
+    for (let r = 0; r < config.reels; r++) {
+      for (let w = 0; w < config.rows; w++) {
+        if (boardState[r]?.[w] === scatterId) scatterCount++;
+      }
+    }
+    
+    // Check if this is a scatter pay only (no bonus trigger)
+    const isScatterPayOnly = outcome && outcome.type === 'scatter_pay_2';
+
+    // Award free spins based on outcome type, not scatter count
+    // This ensures scatter pays don't trigger free spins
+    const triggersFreeSpin = outcome && outcome.type === 'free_spins_trigger';
+    const freeSpinsAwarded = triggersFreeSpin ? 10 : 0; // Fixed 10 spins for trigger
+    
+    // Check for bonus symbols on paylines
+    const paylines = config.paylinesDefinition || [];
+    let maxBonusOnLine = 0;
+    
+    for (const line of paylines) {
+      let bonusOnThisLine = 0;
+      let lineMatch = true;
+      
+      for (let i = 0; i < line.length; i++) {
+        const [r,w] = line[i];
+        if (boardState[r]?.[w] === bonusId) {
+          if(lineMatch) bonusOnThisLine++;
+        } else {
+          lineMatch = false;
+          if (i < puppyBonusTriggerCount) break;
+        }
+      }
+      
+      if (bonusOnThisLine >= puppyBonusTriggerCount) {
+        maxBonusOnLine = Math.max(maxBonusOnLine, bonusOnThisLine);
+      }
+    }
+    
+    const puppyBonusPicks = maxBonusOnLine;
+    
+    return {
+      freeSpins: triggersFreeSpin && !isScatterPayOnly,
+      freeSpinsCount: freeSpinsAwarded,
+      puppyBonus: maxBonusOnLine >= puppyBonusTriggerCount,
+      puppyBonusPicks: puppyBonusPicks
+    };
   }
 
   launchFreeSpins(spins) {
@@ -597,6 +1348,8 @@ for (let reel = 0; reel < config.reels; reel++) {
 //   }
 // }, [], this);
 // --- MODIFICATION END ---
+this.sound.play('sfx_bonus_freespins_start');
+
      this.scene.launch('FreeSpinsScene', { spins: spins, bet: this.currentBet });
   }
 
@@ -613,6 +1366,8 @@ for (let reel = 0; reel < config.reels; reel++) {
 //   }
 // }, [], this);
 // // --- MODIFICATION END ---
+this.sound.play('sfx_bonus_puppy_start');
+
  this.scene.launch('PuppyBonusScene', { picks: picks, bet: this.currentBet }); // Launch PuppyBonusScene
   }
 
@@ -655,21 +1410,40 @@ for (let reel = 0; reel < config.reels; reel++) {
   }
 
   showWinningLines(winningLines) {
-    // Constants for payline visuals
+    // Constants for visuals
     const NEON_COLORS = [
-      0xFFD700, 0x00eaff, 0x6eff7c, 0xfc41a1, 0xff5c0a,
-      0xa182fc, 0x1fc1c3, 0xc1fc1e, 0xfcfc1e
+      0xFFD87C, // 1 - Sunset Gold
+      0xFFA14A, // 2 - Sunset Orange
+      0xF589A0, // 3 - Dusty Rose
+      0x6DB5D5, // 4 - Lake Blue
+      0x4E9459, // 5 - Pine Green
+      0xB2C248, // 6 - Olive Green
+      0x926943, // 7 - Cabin Brown
+      0xA689C2, // 8 - Dusk Violet
+      0xFFECC7, // 9 - Cream
     ];
-    const PAYLINES = config.paylinesDefinition || [
-      [[0,1],[1,1],[2,1],[3,1],[4,1]], [[0,0],[1,0],[2,0],[3,0],[4,0]], [[0,2],[1,2],[2,2],[3,2],[4,2]],
-      [[0,0],[1,1],[2,2],[3,1],[4,0]], [[0,2],[1,1],[2,0],[3,1],[4,2]], [[0,0],[1,2],[2,0],[3,2],[4,0]],
-      [[0,2],[1,0],[2,2],[3,0],[4,2]], [[0,0],[1,2],[2,1],[3,2],[4,0]], [[0,2],[1,0],[2,1],[3,0],[4,2]]
-    ];
+    const PAYLINES = config.paylinesDefinition || [];
     const REEL_WIDTH = 150, REEL_HEIGHT = 150, START_X = 350, START_Y = this.reelStartY;
     const PUCK_RADIUS = 38;
-    const OUTSIDE_X = START_X + (4 * REEL_WIDTH) + 140; // Always outside 5th reel
+    const OUTSIDE_X = START_X + (4 * REEL_WIDTH) + 140;
   
-    // Clear previous lines and pucks
+    // Calculate total win for effects
+    const totalWin = winningLines.reduce((sum, line) => sum + line.winAmount, 0);
+    const winMultiplier = totalWin / this.currentBet;
+  
+    // Add screen effects for big wins
+    if (winMultiplier >= 25) {
+      this.showBigWinEffects(totalWin);
+    } else if (winMultiplier >= 10) {
+      this.showMediumWinEffects(totalWin);
+    }
+  
+    // ---- CLEAN UP previous win lines and pucks ----
+    // Track all animated line graphics for cleanup
+    if (!this.activeWinLines) this.activeWinLines = [];
+    this.activeWinLines.forEach(g => g.destroy());
+    this.activeWinLines = [];
+  
     this.winLineGraphics.clear();
   
     // Remove old pucks and win labels
@@ -678,13 +1452,53 @@ for (let reel = 0; reel < config.reels; reel++) {
       if (child.getData && child.getData('isWinLabel')) child.destroy();
     });
   
-    // Prepare a map to stack win labels by row at OUTSIDE_X
-    const rowLabelMap = {}; // key: row number, value: [labels]
+    // Remove previous total win text (if any)
+    if (this.totalWinText && this.totalWinText.scene) this.totalWinText.destroy();
+    this.totalWinText = null;
   
-    winningLines.forEach((winInfo, idx) => {
-      // Only show winning lines
+    // Prepare a map to stack win labels by row at OUTSIDE_X
+    const rowLabelMap = {};
+  
+    const symbolEdge = (REEL_WIDTH * 0.7) / 2;
+const symbolTopY = -symbolEdge;
+const symbolBottomY = symbolEdge;
+const maxRow = config.rows - 1;
+
+const getLinePoints = (lineCoords) => lineCoords.map(([r, w], idx, arr) => {
+  let x = START_X + r * REEL_WIDTH;
+  let y = START_Y + w * REEL_HEIGHT;
+
+  // Handle first point
+  if (idx === 0) {
+    x -= symbolEdge; // left edge
+    // Only offset vertically if the next point is NOT the same row
+    if (arr[1] && arr[1][1] !== w) {
+      if (w === 0) y += symbolTopY;
+      else if (w === maxRow) y += symbolBottomY;
+    }
+  }
+  // Handle last point
+  else if (idx === arr.length - 1) {
+    x += symbolEdge; // right edge
+    // Only offset vertically if the previous point is NOT the same row
+    if (arr[idx - 1] && arr[idx - 1][1] !== w) {
+      if (w === 0) y += symbolTopY;
+      else if (w === maxRow) y += symbolBottomY;
+    }
+  }
+  // All other points: stay at center
+
+  return { x, y };
+});
+    
+    
+
+  
+    // Helper for handling a single win line's animation and effects
+    const animateLine = (winInfo, idx, runningTotal, onComplete) => {
+      // Scatter win is handled instantly, not as a "snake"
       if (winInfo.lineIndex === -1) {
-        // Scatter win: highlight scatter symbols and show label
+        // Highlight scatter symbols and show label
         winInfo.symbolPositions.forEach(([r, w]) => {
           this._drawPuckOverSymbol(r, w, 0xFFD700, PUCK_RADIUS);
         });
@@ -694,68 +1508,203 @@ for (let reel = 0; reel < config.reels; reel++) {
           START_Y - 55,
           0xFFD700
         );
+        if (onComplete) onComplete(runningTotal);
         return;
       }
   
-      // "Neon" color selection
+      // "Neon" color for line
       const color = NEON_COLORS[winInfo.lineIndex % NEON_COLORS.length];
       const payline = PAYLINES[winInfo.lineIndex];
-      const points = payline.map(
-        ([r, w]) => ({
-          x: START_X + (r * REEL_WIDTH),
-          y: START_Y + (w * REEL_HEIGHT)
-        })
-      );
+      const points = getLinePoints(payline);
   
-      // Draw glow line (underneath)
-      this.winLineGraphics.lineStyle(14, color, 0.18);
-      this.winLineGraphics.beginPath();
-      this.winLineGraphics.moveTo(points[0].x, points[0].y);
-      for (let i = 1; i < points.length; i++) {
-        this.winLineGraphics.lineTo(points[i].x, points[i].y);
+      // ---- Animate the main "snake" line ----
+      const gfx = this.animateWinningLine(points, color, 900, () => {
+        // Store reference for cleanup
+        this.activeWinLines.push(gfx);
+  
+        // Neon "puck" burst over each symbol in the win
+        winInfo.symbolPositions.forEach(([r, w], symbolIdx) => {
+          this.time.delayedCall(symbolIdx * 50, () => {
+            this._drawPuckOverSymbol(r, w, color, PUCK_RADIUS);
+          });
+        });
+  
+        // Place win label to the right of 5th reel
+        const [finalReel, finalRow] = payline[payline.length - 1];
+        const targetRow = typeof finalRow === 'number' ? finalRow : 1;
+        if (!rowLabelMap[targetRow]) rowLabelMap[targetRow] = [];
+        rowLabelMap[targetRow].push({
+          color,
+          amount: winInfo.winAmount,
+        });
+  
+        if (onComplete) onComplete(runningTotal + winInfo.winAmount);
+      });
+      this.activeWinLines.push(gfx);
+    };
+  
+    // Animate total win counter (0 -> total) in sync with line reveals
+    const animateTotalWin = (from, to, onUpdate, onComplete) => {
+      const steps = 20;
+      let step = 0;
+      const increment = (to - from) / steps;
+      const doStep = () => {
+        step++;
+        const value = (step < steps) ? from + increment * step : to;
+        if (onUpdate) onUpdate(value);
+// --- ADD THIS: Notify UIScene to update the total win label ---
+this.game.events.emit('updateTotalWinText', value);
+
+        if (step < steps) {
+          this.time.delayedCall(25, doStep, [], this);
+        } else if (onComplete) {
+          onComplete();
+        }
+      };
+      doStep();
+    };
+  
+    // ---- Sequence win lines and total win counting ----
+    const animateNextLine = (idx, runningTotal) => {
+      if (idx >= winningLines.length) {
+        // After all lines, show stacked win labels (like before)
+        this.time.delayedCall(1000, () => {
+          Object.entries(rowLabelMap).forEach(([row, arr]) => {
+            const baseY = START_Y + (row * REEL_HEIGHT);
+            arr.forEach((info, i) => {
+              this.showWinLabel(
+                `WIN: ${info.amount.toFixed(2)}`,
+                OUTSIDE_X,
+                baseY + i * 32 - (arr.length - 1) * 16,
+                info.color
+              );
+            });
+          });
+        });
+        return;
       }
-      this.winLineGraphics.strokePath();
+      const winInfo = winningLines[idx];
   
-      // Draw bright core line (on top)
-      this.winLineGraphics.lineStyle(5, color, 0.95);
-      this.winLineGraphics.beginPath();
-      this.winLineGraphics.moveTo(points[0].x, points[0].y);
-      for (let i = 1; i < points.length; i++) {
-        this.winLineGraphics.lineTo(points[i].x, points[i].y);
-      }
-      this.winLineGraphics.strokePath();
-  
-      // Neon "puck" burst over each symbol in the win
-      winInfo.symbolPositions.forEach(([r, w]) => {
-        this._drawPuckOverSymbol(r, w, color, PUCK_RADIUS);
+      animateLine(winInfo, idx, runningTotal, (newTotal) => {
+        // Animate total win up to new value
+        animateTotalWin(runningTotal, newTotal, value => {
+          // Remove and update total win text
+          if (this.totalWinText && this.totalWinText.scene) this.totalWinText.destroy();
+          // let barX = 650, barY = 685; // Match your UIScene
+          // let totalWinX = barX + 55;
+          // let totalWinY = barY;
+
+          // this.totalWinText = this.add.text(
+          //   totalWinX, totalWinY,
+          //   `TOTAL WIN: ${value.toFixed(2)}`,
+          //   {
+          //     fontSize: '28px',
+          //     color: '#FFD700',
+          //     fontFamily: 'Arial Black',
+          //     stroke: '#000',
+          //     strokeThickness: 4,
+          //     align: 'center',
+          //     backgroundColor: '#000000CC',
+          //     padding: { x: 18, y: 8 }
+          //   }
+          // ).setOrigin(0.5).setDepth(99999).setData('isWinLabel', true);
+        }, () => {
+          // After count up, animate next line
+          animateNextLine(idx + 1, newTotal);
+        });
       });
+    };
   
-      // Always place win label to the right of 5th reel, aligned with last payline row (not hit symbol)
-      const [finalReel, finalRow] = payline[payline.length - 1];
-      // We always want finalReel to be 4 (the last reel), but if payline length is shorter, fall back
-      const targetRow = typeof finalRow === 'number' ? finalRow : 1; // fallback to row 1 if somehow undefined
-      if (!rowLabelMap[targetRow]) rowLabelMap[targetRow] = [];
-      rowLabelMap[targetRow].push({
-        color,
-        amount: winInfo.winAmount,
-      });
-    });
-  
-    // Render all stacked win labels at OUTSIDE_X, vertically for each row
-    Object.entries(rowLabelMap).forEach(([row, arr]) => {
-      const baseY = START_Y + (row * REEL_HEIGHT);
-      arr.forEach((info, idx) => {
-        // Stack vertically if more than one on the same row
-        this.showWinLabel(
-          `WIN: ${info.amount.toFixed(2)}`,
-          OUTSIDE_X,
-          baseY + idx * 32 - (arr.length - 1) * 16, // stack if multiples, centered
-          info.color
-        );
-      });
-    });
+    // ---- Start with the first win line and 0 running total ----
+    animateNextLine(0, 0);
   }
   
+
+  
+ // MainScene.js
+
+// Animate a payline snake-style from left to right
+// points = array of {x, y}, color = hex, duration = ms, onComplete = callback
+animateWinningLine(points, color, duration = 600, onComplete = () => {}) {
+  const gfx = this.add.graphics().setDepth(2002); // Higher depth to ensure visible
+  let progress = 0;
+  let totalLength = 0;
+
+  // Calculate total line length
+  for (let i = 1; i < points.length; i++) {
+    const dx = points[i].x - points[i - 1].x;
+    const dy = points[i].y - points[i - 1].y;
+    totalLength += Math.sqrt(dx * dx + dy * dy);
+  }
+
+  const startTime = this.time.now;
+
+  const drawStep = () => {
+    let elapsed = this.time.now - startTime;
+    progress = Phaser.Math.Clamp(elapsed / duration, 0, 1);
+
+    gfx.clear();
+
+    // --- Draw glow line (underneath) ---
+    gfx.lineStyle(14, color, 0.18);
+    gfx.beginPath();
+    gfx.moveTo(points[0].x, points[0].y);
+    let drawn = 0;
+    for (let i = 1; i < points.length; i++) {
+      const dx = points[i].x - points[i - 1].x;
+      const dy = points[i].y - points[i - 1].y;
+      const segLen = Math.sqrt(dx * dx + dy * dy);
+
+      if (drawn + segLen > totalLength * progress) {
+        const remain = totalLength * progress - drawn;
+        const angle = Math.atan2(dy, dx);
+        const x = points[i - 1].x + Math.cos(angle) * remain;
+        const y = points[i - 1].y + Math.sin(angle) * remain;
+        gfx.lineTo(x, y);
+        break;
+      } else {
+        gfx.lineTo(points[i].x, points[i].y);
+        drawn += segLen;
+      }
+    }
+    gfx.strokePath();
+
+    // --- Draw bright core line (on top) ---
+    gfx.lineStyle(5, color, 0.95);
+    gfx.beginPath();
+    gfx.moveTo(points[0].x, points[0].y);
+    drawn = 0;
+    for (let i = 1; i < points.length; i++) {
+      const dx = points[i].x - points[i - 1].x;
+      const dy = points[i].y - points[i - 1].y;
+      const segLen = Math.sqrt(dx * dx + dy * dy);
+
+      if (drawn + segLen > totalLength * progress) {
+        const remain = totalLength * progress - drawn;
+        const angle = Math.atan2(dy, dx);
+        const x = points[i - 1].x + Math.cos(angle) * remain;
+        const y = points[i - 1].y + Math.sin(angle) * remain;
+        gfx.lineTo(x, y);
+        break;
+      } else {
+        gfx.lineTo(points[i].x, points[i].y);
+        drawn += segLen;
+      }
+    }
+    gfx.strokePath();
+
+    if (progress < 1) {
+      this.time.delayedCall(16, drawStep, [], this); // 60fps
+    } else {
+      if (onComplete) onComplete();
+    }
+  };
+
+  drawStep();
+
+  return gfx;
+}
+
 
 
   // Helper: draw a neon puck/glow over a symbol position
@@ -780,7 +1729,7 @@ for (let reel = 0; reel < config.reels; reel++) {
       duration: 180,
       ease: 'Quad.easeOut'
     });
-  }
+  }z
 
   showWinLabel(text, x, y, color) {
     // Background rounded rectangle behind the text
@@ -815,6 +1764,101 @@ for (let reel = 0; reel < config.reels; reel++) {
       .setDepth(1601)
       .setAlpha(1)
       .setData('isWinLabel', true);
+  }
+  
+  // NEW: Big win effects
+  showBigWinEffects(totalWin) {
+    // Screen flash
+    const flash = this.add.rectangle(640, 360, 1280, 720, 0xFFFFFF, 0.8)
+      .setDepth(2500);
+      this.sound.play('sfx_win_big');
+
+    this.tweens.add({
+      targets: flash,
+      alpha: 0,
+      duration: 300,
+      onComplete: () => flash.destroy()
+    });
+    
+    // Camera shake
+    this.cameras.main.shake(300, 0.01);
+    
+    // Big win text
+    const bigWinText = this.add.text(640, 200, 'BIG WIN!', {
+      fontSize: '72px',
+      color: '#FFD700',
+      stroke: '#000000',
+      strokeThickness: 6,
+      fontFamily: 'Arial Black'
+    })
+    .setOrigin(0.5)
+    .setDepth(2600)
+    .setScale(0);
+    
+    this.tweens.add({
+      targets: bigWinText,
+      scale: 1.2,
+      duration: 500,
+      ease: 'Back.easeOut',
+      yoyo: true,
+      hold: 1000,
+      onComplete: () => bigWinText.destroy()
+    });
+    
+    // Particle effects
+    this.createWinParticles(totalWin);
+  }
+  
+  // NEW: Medium win effects
+  showMediumWinEffects(totalWin) {
+    // Glow effect
+    const glow = this.add.sprite(640, 360, 'beer')
+      .setAlpha(0.3)
+      .setScale(15)
+      .setTint(0xFFD700)
+      .setDepth(10);
+    
+    this.tweens.add({
+      targets: glow,
+      alpha: 0,
+      scale: 20,
+      duration: 1000,
+      onComplete: () => glow.destroy()
+    });
+  }
+  
+  // NEW: Create win particles
+  createWinParticles(winAmount) {
+    const particleCount = Math.min(50, Math.floor(winAmount / this.currentBet));
+    
+    for (let i = 0; i < particleCount; i++) {
+      const x = Phaser.Math.Between(200, 1080);
+      const y = Phaser.Math.Between(200, 520);
+      
+      const particle = this.add.sprite(x, y, 'beer')
+        .setScale(0.3)
+        .setAlpha(0)
+        .setDepth(2400);
+      
+      this.tweens.add({
+        targets: particle,
+        alpha: 1,
+        scale: 0.5,
+        x: x + Phaser.Math.Between(-100, 100),
+        y: y - Phaser.Math.Between(50, 150),
+        duration: Phaser.Math.Between(1000, 2000),
+        delay: i * 20,
+        ease: 'Power2',
+        onComplete: () => {
+          this.tweens.add({
+            targets: particle,
+            alpha: 0,
+            duration: 500,
+            onComplete: () => particle.destroy()
+          });
+        }
+      });
+    }
   }
     
   

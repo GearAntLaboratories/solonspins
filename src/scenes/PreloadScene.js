@@ -93,9 +93,23 @@ this.load.image('main_logo', 'assets/images/ui/main_logo.png'); // Adjust path
       this.load.image('betDownButton', 'assets/images/ui/bet-down.png');
 
       // Load audio (Assuming these filenames are still correct)
-      this.load.audio('spinSound', 'assets/sounds/spin.mp3');
-      this.load.audio('winSound', 'assets/sounds/win.mp3');
-      this.load.audio('bonusSound', 'assets/sounds/bonus.mp3');
+      this.load.audio('sfx_spin_button', 'assets/sounds/sfx_spin_button.mp3');
+this.load.audio('sfx_reel_start', 'assets/sounds/sfx_reel_start.mp3');
+this.load.audio('sfx_reel_stop', 'assets/sounds/sfx_reel_stop.mp3');
+this.load.audio('sfx_win_small', 'assets/sounds/sfx_win_small.mp3');
+this.load.audio('sfx_win_big', 'assets/sounds/sfx_win_big.mp3');
+this.load.audio('sfx_scatter_landed', 'assets/sounds/sfx_scatter_landed.mp3');
+this.load.audio('sfx_bonus_puppy_start', 'assets/sounds/sfx_bonus_puppy_start.mp3');
+this.load.audio('sfx_bonus_freespins_start', 'assets/sounds/sfx_bonus_freespins_start.mp3');
+this.load.audio('music_bonus_puppy_loop', 'assets/sounds/music_bonus_puppy_loop.mp3');
+this.load.audio('music_bonus_freespins_loop', 'assets/sounds/music_bonus_freespins_loop.mp3');
+this.load.audio('sfx_pick_credit', 'assets/sounds/sfx_pick_credit.mp3');
+this.load.audio('sfx_pick_poop', 'assets/sounds/sfx_pick_poop.mp3');
+this.load.audio('sfx_expanding_wild', 'assets/sounds/sfx_expanding_wild.mp3');
+this.load.audio('sfx_bonus_end', 'assets/sounds/sfx_bonus_end.mp3');
+this.load.audio('sfx_insufficient_credits', 'assets/sounds/sfx_insufficient_credits.mp3');
+this.load.audio('sfx_near_miss', 'assets/sounds/sfx_near_miss.mp3');
+
 
       console.log('All assets loaded successfully');
     } catch (e) {

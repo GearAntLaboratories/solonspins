@@ -27,10 +27,16 @@ export default class UIScene extends Phaser.Scene {
 
     this.createButtons();
     this.createTextDisplays();
+
     if (this.showStats) this.createStatsDisplay();
     this.listenToEvents();
     this.updateCreditsText();
     this.updateBetText();
+    this.game.events.on('updateTotalWinText', (amount) => {
+      this.updateTotalWinText(amount);
+    });
+    
+    
   }
 
   createButtons() {
@@ -66,12 +72,21 @@ export default class UIScene extends Phaser.Scene {
       .on('pointerdown', this.onSpinClick, this);
   
     // (Paytable & debug buttons remain top left)
-    const buttonStartX = 300;
-    let buttonStartY = 50;
-    this.paytableButton = this.add.text(
-      buttonStartX, buttonStartY, 'PAYTABLE',
-      { fontSize: '18px', color: '#FFFFFF', backgroundColor: '#004488', padding: { x: 12, y: 6 } }
-    ).setOrigin(0, 0).setDepth(1100).setInteractive().on('pointerdown', this.showPaytable, this);
+    const buttonStartX = 5;
+    let buttonStartY = 5;
+    this.paytableButton = this.add.text(5, 5, 'PAYTABLE', {
+      fontSize: '28px',
+      fontFamily: 'Arial Black',
+      color: '#FFD700',
+      backgroundColor: '#222A',
+      stroke: '#000',
+      strokeThickness: 3,
+      padding: { left: 20, right: 20, top: 10, bottom: 10 },
+      align: 'center'
+    })
+    .setOrigin(0, 0)
+    .setInteractive({ useHandCursor: true });
+  
   
     buttonStartY += 36;
     if (process.env.NODE_ENV !== 'production') {
@@ -91,7 +106,49 @@ export default class UIScene extends Phaser.Scene {
   createTextDisplays() {
     // Credits (upper left)
     const style = { fontFamily: 'Arial', fontSize: '24px', color: '#FFFFFF', align: 'center', stroke: '#000000', strokeThickness: 3 };
-    this.creditsText = this.add.text(100, 50, `CREDITS: ${this.credits.toFixed(2)}`, style);
+    // this.creditsText = this.add.text(100, 50, `CREDITS: ${this.credits.toFixed(2)}`, style);
+    // Position
+    const slotStartX = 280;
+    const slotStartY = 265;
+    
+    // Static "CREDITS:" label
+    this.creditsLabel = this.add.text(
+      slotStartX,
+      slotStartY - 70,
+      `CREDITS:`, {
+        fontSize: '22px',
+        fontFamily: 'Arial',
+        color: '#E6E6E6',
+        backgroundColor: '#222C',
+        fontStyle: 'bold',
+        align: 'center',
+        padding: { left: 18, right: 0, top: 4, bottom: 4 },
+        stroke: '#000',
+        strokeThickness: 2,
+        shadow: { offsetX: 1, offsetY: 1, color: "#000", blur: 2, fill: true }
+      }
+    ).setOrigin(0, 1).setDepth(9999);
+    
+    // Credits amount (positioned just below or to the right of the label)
+    this.creditsText = this.add.text(
+      slotStartX+124,
+      slotStartY-70, // a bit below the label
+      `${this.credits.toFixed(2)}`,
+      {
+        fontSize: '22px',
+        fontFamily: 'Arial',
+        color: '#E6E6E6',
+        backgroundColor: '#222C',
+        fontStyle: 'bold',
+        align: 'center',
+        padding: { left: 5, right: 18, top: 4, bottom: 4 },
+        stroke: '#000',
+        strokeThickness: 2,
+        shadow: { offsetX: 1, offsetY: 1, color: "#000", blur: 2, fill: true }
+      }
+    ).setOrigin(0, 1).setDepth(9999);
+    
+
   
     // --- BET and WIN text in the bar ---
     const barX = 650;
@@ -106,7 +163,30 @@ export default class UIScene extends Phaser.Scene {
       .setOrigin(0.5).setDepth(1000);
   }
   
-    
+  updateTotalWinText(amount) {
+    // Remove previous if present
+    if (this.totalWinText && this.totalWinText.scene) this.totalWinText.destroy();
+  
+    // Calculate position between betUpButton and spinButton
+    const x = (this.betUpButton.x + this.spinButton.x) / 2;
+    const y = this.spinButton.y;
+  
+    this.totalWinText = this.add.text(
+      x, y,
+      `TOTAL WIN: ${amount.toFixed(2)}`,
+      {
+        fontSize: '24px',
+        color: '#FFD700',
+        fontFamily: 'Arial Black',
+        stroke: '#000',
+        strokeThickness: 4,
+        align: 'center',
+        //backgroundColor: '#000000CC',
+        padding: { x: 18, y: 8 }
+      }
+    ).setOrigin(0.5).setDepth(9999); // On top of UI #FF0000 #FFD700
+  }
+   
   
 
   // Only show if this.showStats = true
@@ -136,6 +216,24 @@ export default class UIScene extends Phaser.Scene {
 
   onSpinClick() {
     console.log(`UIScene: onSpinClick() called. isSpinning = ${this.isSpinning}`);
+    this.sound.play('sfx_spin_button');
+    const mainScene = this.scene.manager.getScene('MainScene');
+    if (this.totalWinText && this.totalWinText.scene) {
+      this.totalWinText.destroy();
+      this.totalWinText = null;
+    }
+    
+    if (mainScene.activeWinLines) {
+      mainScene.activeWinLines.forEach(g => g.destroy());
+      mainScene.activeWinLines = [];
+    }
+    // Remove win labels and pucks
+    mainScene.children.list.forEach(child => {
+      if (child.getData && (child.getData('isWinPuck') || child.getData('isWinLabel'))) {
+        child.destroy();
+      }
+    });
+
     if (this.isSpinning) {
       console.log("UIScene: Spin blocked (spinning).");
       return;
@@ -176,17 +274,13 @@ export default class UIScene extends Phaser.Scene {
       this.updateStatsDisplay();
       this.credits += data.amount;
       this.updateCreditsText();
-      // --- WIN TEXT: Always at fixed position, clear after short delay
-      if (data.bonusType === 'freeSpins') this.winText.setText(`FREE SPINS BONUS WIN: ${data.amount.toFixed(2)}`);
-      else if (data.bonusType === 'puppyBonus') this.winText.setText(`PUPPY BONUS WIN: ${data.amount.toFixed(2)}`);
-      else this.winText.setText(`WIN: ${data.amount.toFixed(2)}`);
+  
+      // No winText.setText calls!
       this.showCoins(data.amount);
-      this.time.delayedCall(1800, () => {
-        if (this.winText?.scene) this.winText.setText('');
-      });
     }
     this.saveGameData();
   }
+  
 
   showCoins(amount) {
     if (amount < this.bet * 5) return;
@@ -262,7 +356,7 @@ export default class UIScene extends Phaser.Scene {
   }
 
   updateCreditsText() {
-    if (this.creditsText) this.creditsText.setText(`CREDITS: ${this.credits.toFixed(2)}`);
+    if (this.creditsText) this.creditsText.setText(`${this.credits.toFixed(2)}`);
   }
   updateBetText() {
     if (this.betText) this.betText.setText(`BET: ${this.bet.toFixed(2)}`);
@@ -270,6 +364,8 @@ export default class UIScene extends Phaser.Scene {
 
   showInsufficientFunds() {
     if (this.insufficientFundsMsg?.scene) return;
+    this.sound.play('sfx_insufficient_credits');
+
     this.insufficientFundsMsg = this.add.text(640, 360, 'INSUFFICIENT CREDITS', {
       fontFamily: 'Arial', fontSize: '32px', color: '#FF0000', backgroundColor: '#000000',
       padding: { x: 20, y: 10 }

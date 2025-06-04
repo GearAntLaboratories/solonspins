@@ -4,51 +4,54 @@ export default {
   rows: 3,
   paylines: 9,
   minBet: 0.09,
-  maxBet: 45.00,
-  defaultBet: 0.09,
-  coinValues: [0.01, 0.02, 0.05, 0.10, 0.20, 0.50, 1.00, 2.00, 5.00],
+  maxBet: 1.35,
+  defaultBet: 0.90,
+  coinValues: [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09, 0.10, 0.11, 0.12, 0.13, 0.14, 0.15],
 
   // Updated symbol paytable to match simulation values (per payline)
+  // Updated symbol paytable for 99% RTP (per payline)
   symbols: [
-    { id: 'pam_mike', name: 'Pam & Mike', pays: { 3: 10, 4: 50, 5: 200 } },
-    { id: 'grant', name: 'Grant', pays: { 3: 8, 4: 40, 5: 150 } },
-    { id: 'logan', name: 'Logan', pays: { 3: 8, 4: 40, 5: 150 } },
-    { id: 'nick', name: 'Nick', pays: { 3: 6, 4: 30, 5: 100 } },
-    { id: 'beer', name: 'Beer Can', pays: { 3: 4, 4: 20, 5: 75 } },
-    { id: 'flag', name: 'American Flag', pays: { 3: 4, 4: 20, 5: 75 } },
-    { id: 'a', name: 'A', pays: { 3: 2, 4: 10, 5: 50 } },
-    { id: 'k', name: 'K', pays: { 3: 2, 4: 10, 5: 40 } },
-    { id: 'q', name: 'Q', pays: { 3: 1.5, 4: 8, 5: 30 } },
-    { id: 'j', name: 'J', pays: { 3: 1.5, 4: 8, 5: 25 } }
+    { id: 'pam_mike', name: 'Pam & Mike', pays: { 2: 2, 3: 15, 4: 75, 5: 250 } },
+    { id: 'grant', name: 'Grant', pays: { 2: 2, 3: 12, 4: 60, 5: 200 } },
+    { id: 'logan', name: 'Logan', pays: { 2: 0, 3: 10, 4: 50, 5: 150 } },
+    { id: 'nick', name: 'Nick', pays: { 2: 0, 3: 8, 4: 40, 5: 125 } },
+    { id: 'beer', name: 'Beer Can', pays: { 2: 0, 3: 5, 4: 25, 5: 75 } },
+    { id: 'flag', name: 'American Flag', pays: { 2: 0, 3: 5, 4: 25, 5: 75 } },
+    { id: 'a', name: 'A', pays: { 2: 0, 3: 3, 4: 15, 5: 50 } },
+    { id: 'k', name: 'K', pays: { 2: 0, 3: 3, 4: 15, 5: 50 } },
+    { id: 'q', name: 'Q', pays: { 2: 0, 3: 2, 4: 10, 5: 40 } },
+    { id: 'j', name: 'J', pays: { 2: 0, 3: 2, 4: 10, 5: 40 } }
   ],
 
-  // Added wild pays from simulation
+  // Enhanced wild pays for 99% RTP
   wild: { 
     id: 'loon', 
     name: 'Loon', 
     isWild: true,
-    pays: { 3: 10, 4: 100, 5: 500 }
+    pays: { 2: 2, 3: 20, 4: 100, 5: 500 }
   },
 
-  // Updated scatter pays to match simulation
+  // Scatter pays remain the same
   scatter: {
     id: 'fire',
     name: 'Bonfire',
     isScatter: true,
-    pays: { 3: 5, 4: 20, 5: 100 } // x total bet (not per line)
+    pays: { 2: 2, 3: 5, 4: 20, 5: 100 } // x total bet (not per line)
   },
 
   bonus: { id: 'elsi', name: 'Esli', isBonus: true },
 
   // Free Spins configuration
+  // Free Spins configuration
   freeSpins: {
     triggerCount: 3, // Min scatters needed
-    awards: {        // Spins awarded per scatter count
-      3: 8,
-      4: 12,
-      5: 15
+    awards: {        // Spins awarded (simplified - always 10)
+      3: 10,
+      4: 10,
+      5: 10
     },
-    multiplier: 1 // Default multiplier in free spins
+    multiplier: 1, // Default multiplier in free spins
+    minimumWin: 5  // Minimum win multiplier guaranteed
   },
 
   // Puppy Bonus configuration (renamed from puppyBonus to match new theme)

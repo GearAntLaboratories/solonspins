@@ -10,8 +10,8 @@ export default class OutcomeManager {
       // No Win - 55%
       { weight: 5500, type: 'no_win', rtp: 0, description: 'No winning combination' },
       
-      // Near Misses - 8% (NEW)
-      { weight: 500, type: 'near_miss_scatter_2', rtp: 0, scatters: 2, description: '2 scatters - near miss' },
+      // Near Misses - 8.5ls% (NEW)
+      { weight: 550, type: 'near_miss_scatter_2', rtp: 0.2, scatters: 2, description: '2 scatters - near miss' },
       { weight: 300, type: 'near_miss_bonus_2', rtp: 0, bonusSymbols: 2, description: '2 bonus symbols - near miss' },
       
       // Tiny Wins (less than bet) - 10% (NEW)
@@ -36,7 +36,7 @@ export default class OutcomeManager {
       { weight: 50, type: 'large_win_5_high', rtp: 15.0, minWin: 10.0, maxWin: 25.0, description: '5 high symbols' },
       
       // Scatter Pays (no bonus trigger) - 0.5% (UPDATED)
-      { weight: 50, type: 'scatter_pay_2', rtp: 0.2, scatters: 2, description: '2 scatters pay only' },
+      //{ weight: 50, type: 'scatter_pay_2', rtp: 0.2, scatters: 2, description: '2 scatters pay only' },
       
       // Bonus Triggers - 2.5%
       { weight: 150, type: 'free_spins_trigger', rtp: 0, scatters: 3, freeSpins: 10, description: '3+ fire scatters' },

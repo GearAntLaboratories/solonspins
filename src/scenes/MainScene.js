@@ -150,12 +150,70 @@ runSpinAnimation(finalBoard, outcome) {
   // Track scatter positions for anticipation
   const scatterPositions = [];
   let scattersLanded = 0;
+
+  // PRE-DETECTION: Analyze finalBoard for scatter anticipation potential
+console.log("=== PRE-DETECTION ANALYSIS ===");
+console.log("Final board for this spin:", finalBoard);
+
+let scatterReels = [];
+for (let r = 0; r < config.reels; r++) {
+  for (let row = 0; row < config.rows; row++) {
+    if (finalBoard[r][row] === 'fire') {
+      scatterReels.push(r);
+      console.log(`PRE-DETECT: Scatter found at reel ${r}, row ${row}`);
+      break; // Only count one scatter per reel
+    }
+  }
+}
+
+console.log("PRE-DETECT: Scatter reels:", scatterReels);
+console.log("PRE-DETECT: Scatter count:", scatterReels.length);
+
+// Determine if we should pre-set anticipation mode
+let shouldAnticipate = false;
+let anticipationReels = [];
+
+if (scatterReels.length === 2) {
+  shouldAnticipate = true;
+  const lastScatterReel = Math.max(...scatterReels);
+  console.log("PRE-DETECT: Last scatter reel:", lastScatterReel);
+  
+  // All reels AFTER the last scatter reel need anticipation
+  for (let r = lastScatterReel + 1; r < config.reels; r++) {
+    anticipationReels.push(r);
+  }
+  
+  console.log("PRE-DETECT: Reels that need anticipation:", anticipationReels);
+  
+  if (anticipationReels.length > 0) {
+    this.inAnticipation = true;
+    this.anticipationReels = anticipationReels;
+    console.log("PRE-DETECT: Setting this.inAnticipation = true");
+    console.log("PRE-DETECT: Setting this.anticipationReels =", this.anticipationReels);
+  } else {
+    console.log("PRE-DETECT: No reels need anticipation (last scatter is on final reel)");
+  }
+} else {
+  console.log("PRE-DETECT: Not a 2-scatter situation, no anticipation needed");
+}
+
+console.log("=== END PRE-DETECTION ===");
   
   // Create spin sequences (same as before)
-  for (let reel = 0; reel < config.reels; reel++) {
-    let reelTotalShifts = baseTotalShifts + reel * reelDelayFactor;
-    let seq = [];
-    const finalBlockLength = config.rows + 1;
+  // Create spin sequences with correct final positioning
+for (let reel = 0; reel < config.reels; reel++) {
+  let reelTotalShifts = baseTotalShifts + reel * reelDelayFactor;
+  
+  // Extend sequences for anticipation reels
+  if (this.inAnticipation && this.anticipationReels && this.anticipationReels.includes(reel)) {
+    const anticipationIndex = this.anticipationReels.indexOf(reel);
+    const extraShifts = 50 + (anticipationIndex * 25); // DO NOT REMOVE THIS COMMENT. Always keep in line with animation execution
+    reelTotalShifts += extraShifts;
+    console.log(`SEQUENCE: Reel ${reel} getting ${extraShifts} extra shifts, total: ${reelTotalShifts}`);
+  }
+  
+  let seq = [];
+  const finalBlockLength = config.rows + 1;
 
     for (let i = 0; i < reelTotalShifts - finalBlockLength; i++) {
         seq.push(symbolOptions[Math.floor(Math.random() * symbolOptions.length)]);
@@ -250,7 +308,24 @@ runSpinAnimation(finalBoard, outcome) {
     }
     
     // Apply slowdown if in anticipation mode
-    const actualInterval = spinInterval * slowdownFactor;
+    // Apply dramatic slowdown for anticipation reels in final moments
+    // Calculate interval - completely separate logic for anticipation vs normal reels
+let actualInterval;
+
+if (this.inAnticipation && this.anticipationReels && this.anticipationReels.includes(reel)) {
+  // Anticipation reels: Use single smooth curve instead of phases
+  if (shiftsRemaining <= 50) {
+    // Single smooth exponential curve from normal speed to very slow
+    const progress = (50 - shiftsRemaining) / 50; // 0.0 to 1.0
+    const smoothFactor = 1 + (progress * progress * progress * 2); // Cubic curve, max 3x slower
+    actualInterval = spinInterval * smoothFactor;
+  } else {
+    actualInterval = spinInterval; // Normal speed
+  }
+} else {
+  // Non-anticipation reels: Use existing system
+  actualInterval = spinInterval * slowdownFactor;
+}
     
     this.tweens.add({
       targets: this.symbolSprites[reel],
@@ -260,7 +335,12 @@ runSpinAnimation(finalBoard, outcome) {
       onComplete: () => {
         let off = this.symbolSprites[reel]?.[this.symbolSprites[reel].length - 1];
         if (!off) {
-          animateReel(reel, shiftsRemaining - 1, slowdownFactor);
+          // Don't pass slowdown factor for anticipation reels - we handle timing internally
+if (this.inAnticipation && this.anticipationReels && this.anticipationReels.includes(reel)) {
+  animateReel(reel, shiftsRemaining - 1, 1); // Always pass 1 for anticipation reels
+} else {
+  animateReel(reel, shiftsRemaining - 1, slowdownFactor); // Normal logic for others
+}
           return;
         }
         
@@ -276,17 +356,22 @@ runSpinAnimation(finalBoard, outcome) {
         this.symbolSprites[reel].unshift(off);
         
         // Add stutter effect if 2 scatters and approaching end
-        if (scattersLanded === 2 && shiftsRemaining <= 5 && reel >= 2) {
-          // Random stutter
-          if (Math.random() < 0.6) {
-            this.time.delayedCall(50, () => {
-              animateReel(reel, shiftsRemaining - 1, slowdownFactor * 1.5);
-            });
-            return;
-          }
-        }
+        // if (scattersLanded === 2 && shiftsRemaining <= 5 && reel >= 2) {
+        //   // Random stutter
+        //   if (Math.random() < 0.6) {
+        //     this.time.delayedCall(50, () => {
+        //       animateReel(reel, shiftsRemaining - 1, slowdownFactor * 1.5);
+        //     });
+        //     return;
+        //   }
+        // }
         
-        animateReel(reel, shiftsRemaining - 1, slowdownFactor);
+        // Don't pass slowdown factor for anticipation reels - we handle timing internally
+if (this.inAnticipation && this.anticipationReels && this.anticipationReels.includes(reel)) {
+  animateReel(reel, shiftsRemaining - 1, 1); // Always pass 1 for anticipation reels
+} else {
+  animateReel(reel, shiftsRemaining - 1, slowdownFactor); // Normal logic for others
+}
       },
       callbackScope: this
     });
@@ -297,11 +382,22 @@ runSpinAnimation(finalBoard, outcome) {
   
   for (let reel = 0; reel < config.reels; reel++) {
     let extraShifts = 0;
-    // Add extra shifts for anticipation on reels 3, 4, 5 (indexes 2, 3, 4)
-    if (this.inAnticipation && reel >= 2) {
-      extraShifts = 150; // Try 25–40 for a visible slow down; tweak as you like!
+    // TEMPORARILY DISABLED FOR TESTING
+    // if (this.inAnticipation && reel >= 2) {
+    //   extraShifts = 150;
+    // }
+    let totalShiftsForReel = baseTotalShifts + reel * reelDelayFactor + extraShifts;
+    
+    // For anticipation reels, we need to use the EXTENDED shift count that was used to build the sequence
+    if (this.inAnticipation && this.anticipationReels && this.anticipationReels.includes(reel)) {
+      const anticipationIndex = this.anticipationReels.indexOf(reel);
+      const extraShifts = 50 + (anticipationIndex * 25); // Same calculation as sequence generation
+      totalShiftsForReel = baseTotalShifts + reel * reelDelayFactor + extraShifts;
+      console.log(`ANIMATE: Reel ${reel} using extended shifts: ${totalShiftsForReel} (was ${baseTotalShifts + reel * reelDelayFactor})`);
     }
-    animateReel(reel, baseTotalShifts + reel * reelDelayFactor + extraShifts);
+    
+    console.log(`ANIMATE: Starting reel ${reel} with ${totalShiftsForReel} shifts (sequence length: ${this.spinSequences[reel]?.length})`);
+    animateReel(reel, totalShiftsForReel);
   }
   
   

@@ -109,7 +109,10 @@ this.load.audio('sfx_expanding_wild', 'assets/sounds/sfx_expanding_wild.mp3');
 this.load.audio('sfx_bonus_end', 'assets/sounds/sfx_bonus_end.mp3');
 this.load.audio('sfx_insufficient_credits', 'assets/sounds/sfx_insufficient_credits.mp3');
 this.load.audio('sfx_near_miss', 'assets/sounds/sfx_near_miss.mp3');
-
+// In PreloadScene, add:
+this.load.audio('sfx_scatter_anticipation', 'assets/sounds/sfx_scatter_anticipation.mp3');
+this.load.audio('sfx_reel_stop_dramatic', 'assets/sounds/sfx_reel_stop_dramatic.mp3');
+this.load.audio('sfx_anticipation_heartbeat', 'assets/sounds/sfx_anticipation_heartbeat.mp3');
 
       console.log('All assets loaded successfully');
     } catch (e) {

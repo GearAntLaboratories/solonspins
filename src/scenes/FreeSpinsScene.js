@@ -2,6 +2,8 @@
 import Phaser from 'phaser';
 import config from '../game/config';
 import OutcomeManager from '../game/OutcomeManager';
+import WinEvaluator from '../game/WinEvaluator';
+import WinDisplayManager from '../ui/WinDisplayManager';
 
 export default class FreeSpinsScene extends Phaser.Scene {
   constructor() {
@@ -19,8 +21,17 @@ export default class FreeSpinsScene extends Phaser.Scene {
     this.spinState = 'idle'; // idle, spinning, evaluation, transitioning, ending
     this.reelStartY = 295; // Match MainScene positioning
 
-    // Initialize OutcomeManager
+    // Claude suggested addition on 2025-06-08: Inferno Reel enhancement system
+    this.infernoReels = [false, false, false, false, false]; // Tracks which reels are on fire this spin
+    this.emberParticles = []; // Active ember particles
+    this.infernoBackgrounds = []; // Fire background overlays
+    this.emberTimingController = null; // Controls ember sequence timing
+    this.predeterminedOutcome = null; // Pre-determined outcome for ember targeting
+
+    // Initialize OutcomeManager, WinEvaluator, and WinDisplayManager
     this.outcomeManager = new OutcomeManager();
+    this.winEvaluator = new WinEvaluator(config);
+    this.winDisplayManager = new WinDisplayManager(this);
   }
 
   init(data) {
@@ -33,6 +44,11 @@ export default class FreeSpinsScene extends Phaser.Scene {
     this.expandedWilds = [false, false, false, false, false];
     this.reelsToExpand = [];
     this.minimumWinGuaranteed = this.currentBet * 5; // Minimum 5x bet win
+    
+    // Claude suggested addition on 2025-06-08: Reset Inferno Reel system
+    this.infernoReels = [false, false, false, false, false];
+    this.predeterminedOutcome = null;
+    this.cleanupEmberSystem();
   }
 
   create() {
@@ -44,6 +60,9 @@ export default class FreeSpinsScene extends Phaser.Scene {
       this.winLineGraphics.destroy();
       this.winLineGraphics = null;
     }
+    
+    // Clear any previous win displays using WinDisplayManager
+    this.winDisplayManager.clearWinDisplays();
     
     // Reset total win
     this.totalWin = 0;
@@ -72,6 +91,9 @@ export default class FreeSpinsScene extends Phaser.Scene {
     this.createInitialReels(); // Create the actual symbols
     this.createWinLineGraphics();
     this.applyMaskToAll(); // Apply the created mask AFTER symbols exist
+
+    // Claude suggested addition on 2025-06-08: Start ambient ember system
+    this.createAmbientEmbers();
 
     this.time.delayedCall(1500, this.startNextSpin, [], this);
   }
@@ -164,14 +186,71 @@ export default class FreeSpinsScene extends Phaser.Scene {
     }
     const curSpin = this.initialSpins - this.spinsRemaining + 1;
     console.log(`Starting FS ${curSpin}/${this.initialSpins}`);
-    this.spin();
+    
+    // Claude suggested addition on 2025-06-08: Phase 1 - Ember sequence before spin
+    this.cleanupEmberSystem(); // Clean up previous spin's effects
+    
+    // Pre-determine the outcome so ember system knows which reels will expand
+    this.predetermineOutcome();
+    
+    // Create ember shower with dramatic pause
+    this.createEmberShower();
+    
+    // Claude suggested fix on 2025-06-08: Longer delay for new over-reels animation system
+    // Wait for ember sequence to complete before starting spin
+    this.time.delayedCall(4500, () => {
+      this.spin();
+    }, [], this);
+  }
+
+  predetermineOutcome() {
+    // Claude suggested addition on 2025-06-08: Pre-determine outcome for ember targeting
+    let outcome;
+    
+    // Check if we need to force a win for minimum guarantee
+    if (this.forceWinNextSpin) {
+      console.log("FS: Forcing a winning outcome for minimum guarantee");
+      const guaranteedWinOutcomes = [
+        { type: 'free_large_win', rtp: 3.0, minWin: 8.0, maxWin: 20.0 },
+        { type: 'free_huge_win', rtp: 6.0, minWin: 20.0, maxWin: 50.0 },
+        { type: 'wild_expand_medium', rtp: 5.0, minWin: 15.0, maxWin: 40.0 }
+      ];
+      outcome = guaranteedWinOutcomes[Math.floor(Math.random() * guaranteedWinOutcomes.length)];
+      this.forceWinNextSpin = false;
+    } else {
+      outcome = this.outcomeManager.getFreeSpinOutcome();
+    }
+    
+    console.log("FS: Pre-determined outcome:", outcome);
+
+    // For wild expansion outcomes, determine which reels should expand
+    this.reelsToExpand = [];
+    if (outcome.type.includes('wild_expand')) {
+      let numReelsToExpand;
+      switch(outcome.type) {
+        case 'wild_expand_small': numReelsToExpand = Math.random() < 0.7 ? 1 : 2; break;
+        case 'wild_expand_medium': numReelsToExpand = 3; break;
+        case 'wild_expand_large': numReelsToExpand = Math.random() < 0.8 ? 4 : 5; break;
+        default: numReelsToExpand = 1;
+      }
+      
+      while (this.reelsToExpand.length < numReelsToExpand) {
+        const reel = Math.floor(Math.random() * config.reels);
+        if (!this.reelsToExpand.includes(reel)) {
+          this.reelsToExpand.push(reel);
+        }
+      }
+      console.log("FS: Reels that will expand this spin:", this.reelsToExpand);
+    }
+    
+    // Store outcome for later use in spin()
+    this.predeterminedOutcome = outcome;
   }
 
   spin() {
     if (this.spinState !== 'idle') return;
     this.spinState = 'spinning';
     this.expandedWilds = [false, false, false, false, false];
-    this.reelsToExpand = [];
 
     this.spinsRemaining--;
     this.spinsText.setText(`FREE SPINS LEFT: ${this.spinsRemaining}`);
@@ -191,42 +270,9 @@ export default class FreeSpinsScene extends Phaser.Scene {
       this.sound.play('spinSound');
     }
 
-    let outcome;
-    
-    // Check if we need to force a win for minimum guarantee
-    if (this.forceWinNextSpin) {
-      console.log("FS: Forcing a winning outcome for minimum guarantee");
-      // Force a good win outcome
-      const guaranteedWinOutcomes = [
-        { type: 'free_large_win', rtp: 3.0, minWin: 8.0, maxWin: 20.0 },
-        { type: 'free_huge_win', rtp: 6.0, minWin: 20.0, maxWin: 50.0 },
-        { type: 'wild_expand_medium', rtp: 5.0, minWin: 15.0, maxWin: 40.0 }
-      ];
-      outcome = guaranteedWinOutcomes[Math.floor(Math.random() * guaranteedWinOutcomes.length)];
-      this.forceWinNextSpin = false;
-    } else {
-      outcome = this.outcomeManager.getFreeSpinOutcome();
-    }
-    
-    console.log("FS: Got outcome:", outcome);
-
-    // For wild expansion outcomes, determine which reels should expand
-    if (outcome.type.includes('wild_expand')) {
-      let numReelsToExpand;
-      switch(outcome.type) {
-        case 'wild_expand_small': numReelsToExpand = Math.random() < 0.7 ? 1 : 2; break;
-        case 'wild_expand_medium': numReelsToExpand = 3; break;
-        case 'wild_expand_large': numReelsToExpand = Math.random() < 0.8 ? 4 : 5; break;
-        default: numReelsToExpand = 1;
-      }
-      this.reelsToExpand = [];
-      while (this.reelsToExpand.length < numReelsToExpand) {
-        const reel = Math.floor(Math.random() * config.reels);
-        if (!this.reelsToExpand.includes(reel)) {
-          this.reelsToExpand.push(reel);
-        }
-      }
-    }
+    // Use the pre-determined outcome
+    const outcome = this.predeterminedOutcome;
+    console.log("FS: Using pre-determined outcome:", outcome);
 
     const symbolBoard = this.generateSymbolBoardFromOutcome(outcome);
     console.log("FS: Generated board for spin animation:", symbolBoard);
@@ -279,7 +325,8 @@ export default class FreeSpinsScene extends Phaser.Scene {
     }
     
     // Verify no accidental wins
-    const wins = this.evaluateWins(board);
+    const fsMultiplier = config.freeSpins?.multiplier || 1;
+    const wins = this.winEvaluator.evaluateWins(board, this.currentBet, fsMultiplier);
     if (wins.totalWin > 0) {
       return this.generateNoWinBoard();
     }
@@ -317,7 +364,8 @@ export default class FreeSpinsScene extends Phaser.Scene {
     
     // Verify win is within expected range if specified
     if (outcome.minWin && outcome.maxWin) {
-      const wins = this.evaluateWins(board);
+      const fsMultiplier = config.freeSpins?.multiplier || 1;
+      const wins = this.winEvaluator.evaluateWins(board, this.currentBet, fsMultiplier);
       const winMultiplier = wins.totalWin / this.currentBet;
       
       if (winMultiplier < outcome.minWin || winMultiplier > outcome.maxWin) {
@@ -375,7 +423,8 @@ export default class FreeSpinsScene extends Phaser.Scene {
       }
     });
     
-    const wins = this.evaluateWins(testBoard);
+    const fsMultiplier = config.freeSpins?.multiplier || 1;
+    const wins = this.winEvaluator.evaluateWins(testBoard, this.currentBet, fsMultiplier);
     const winMultiplier = wins.totalWin / this.currentBet;
     
     if (outcome.minWin && outcome.maxWin) {
@@ -568,24 +617,41 @@ export default class FreeSpinsScene extends Phaser.Scene {
     const boardStateForWinCalc = this.getCurrentBoardState();
     console.log("FS: Board state for win calculation (after any expansions):", boardStateForWinCalc);
 
-    const { totalWin, winningLines } = this.evaluateWins(boardStateForWinCalc);
+    const fsMultiplier = config.freeSpins?.multiplier || 1;
+    const { totalWin, winningLines } = this.winEvaluator.evaluateWins(boardStateForWinCalc, this.currentBet, fsMultiplier);
 
     if (totalWin > 0) {
       console.log(`FS Win: ${totalWin.toFixed(2)}`);
-      this.showWinningLines(winningLines);
+      // Use WinDisplayManager with FreeSpins positioning (Y offset 295 vs MainScene 275)
+      const positionConfig = {
+        startY: this.reelStartY // 295 for FreeSpinsScene
+      };
+      this.winDisplayManager.showWinningLines(winningLines, this.currentBet, positionConfig);
       if (this.sound.get('winSound')) {
         this.sound.play('winSound');
       }
-      this.showWinMessage(totalWin);
+      // Win message is now handled by WinDisplayManager
       this.totalWin += totalWin;
       this.winText.setText(`TOTAL WIN: ${this.totalWin.toFixed(2)}`);
     }
 
     this.spinState = 'transitioning';
-    const displayDelay = totalWin > 0 ? 2000 : 500;
+    // Calculate delay based on number of win lines for proper animation completion
+    // WinDisplayManager timing breakdown:
+    // - Line snake animation: 900ms per line
+    // - Count-up animations: ~200ms per line  
+    // - Win text boxes appear: +1000ms delay after all lines complete
+    // - Extra buffer for expanding wilds with many lines: +2000ms
+    // Formula: minimum 5s, or 1.5s per line + 3s total buffer (generous for expanding wilds)
+    const displayDelay = totalWin > 0 ? 
+      Math.max(5000, winningLines.length * 1500 + 3000) : 500;
+    
+    console.log(`FS: Win display delay set to ${displayDelay}ms for ${winningLines.length} lines`);
     
     this.time.delayedCall(displayDelay, () => {
       if (this.spinsRemaining > 0) {
+        // Clear win displays before starting next spin
+        this.winDisplayManager.clearWinDisplays();
         this.spinState = 'idle';
         this.startNextSpin();
       } else {
@@ -595,6 +661,7 @@ export default class FreeSpinsScene extends Phaser.Scene {
           // Force a winning spin
           this.spinsRemaining = 1;
           this.forceWinNextSpin = true;
+          this.winDisplayManager.clearWinDisplays();
           this.spinState = 'idle';
           this.startNextSpin();
         } else {
@@ -666,400 +733,9 @@ export default class FreeSpinsScene extends Phaser.Scene {
     return board;
   }
 
-  evaluateWins(boardState) {
-    const paylines = config.paylinesDefinition || [];
-    let totalWin = 0;
-    let winningLines = [];
-    const wildKey = config.wild?.id || 'loon';
-    const scatterKey = config.scatter?.id || 'fire';
-    const bonusKey = config.bonus?.id || 'elsi';
-    
-    // Check each payline for wins
-    for (let lineIndex = 0; lineIndex < paylines.length; lineIndex++) {
-      const lineCoordinates = paylines[lineIndex];
-      const lineSymbols = [];
-      const linePositions = [];
-      
-      for (const pos of lineCoordinates) {
-        const [r, w] = pos;
-        if (boardState[r]?.[w] !== undefined) {
-          lineSymbols.push(boardState[r][w]);
-          linePositions.push(pos);
-        } else {
-          lineSymbols.push(null);
-          linePositions.push(pos);
-        }
-      }
-      
-      if (lineSymbols.length === 0 || lineSymbols[0] === null || 
-          lineSymbols[0] === scatterKey || lineSymbols[0] === bonusKey) continue;
-      
-      let firstSymbol = lineSymbols[0];
-      let matchCount = 0;
-      let effectiveSymbol = firstSymbol;
-      
-      for (let i = 0; i < lineSymbols.length; i++) {
-        const currentSymbol = lineSymbols[i];
-        
-        if (i === 0) {
-          if (currentSymbol === wildKey) {
-            matchCount++;
-            // Look for first non-wild to determine line type
-            for (let j = 1; j < lineSymbols.length; j++) {
-              if (lineSymbols[j] !== wildKey && lineSymbols[j] !== scatterKey && lineSymbols[j] !== bonusKey) {
-                effectiveSymbol = lineSymbols[j];
-                break;
-              }
-            }
-            if (effectiveSymbol === wildKey) {
-              effectiveSymbol = wildKey; // All wilds
-            }
-          } else {
-            matchCount++;
-            effectiveSymbol = currentSymbol;
-          }
-        } else {
-          if (currentSymbol === effectiveSymbol || currentSymbol === wildKey) {
-            matchCount++;
-          } else {
-            break;
-          }
-        }
-      }
-      
-      // Check for wins (including 2-symbol wins for high symbols)
-      const symbolConfig = effectiveSymbol === wildKey ? config.wild : config.symbols.find(s => s.id === effectiveSymbol);
-      
-      if (symbolConfig?.pays?.[matchCount]) {
-        const symbolPay = symbolConfig.pays[matchCount];
-        const betPerLine = this.currentBet / (config.paylines || 9);
-        const fsMultiplier = config.freeSpins?.multiplier || 1;
-        const lineWin = symbolPay * betPerLine * fsMultiplier;
-        
-        if (lineWin > 0) {
-          totalWin += lineWin;
-          winningLines.push({
-            lineIndex: lineIndex,
-            symbolPositions: linePositions.slice(0, matchCount),
-            symbol: effectiveSymbol,
-            winAmount: lineWin,
-            count: matchCount
-          });
-        }
-      }
-    }
-    
-    // Check for scatter pays
-    let scatterCount = 0;
-    let scatterPositions = [];
-    for (let r = 0; r < config.reels; r++) {
-      for (let w = 0; w < config.rows; w++) {
-        if (boardState[r]?.[w] === scatterKey) {
-          scatterCount++;
-          scatterPositions.push([r, w]);
-        }
-      }
-    }
-    
-    // Scatter pays (including 2 scatters)
-    if (scatterCount >= 2 && config.scatter?.pays?.[scatterCount]) {
-      let scatterPay = config.scatter.pays[scatterCount];
-      const scatterWinAmount = scatterPay * this.currentBet;
-      
-      if (scatterWinAmount > 0) {
-        totalWin += scatterWinAmount;
-        winningLines.push({
-          lineIndex: -1,
-          symbolPositions: scatterPositions,
-          symbol: scatterKey,
-          winAmount: scatterWinAmount,
-          count: scatterCount
-        });
-      }
-    }
-    
-    return { totalWin, winningLines };
-  }
+  // Claude suggested refactor on 2025-06-08: Removed duplicate win display methods
+  // All win display logic now handled by WinDisplayManager for consistency
  
-  showWinningLines(winningLines) {
-    // Use MainScene-style win display
-    const NEON_COLORS = [
-      0xFFD700, 0x00eaff, 0x6eff7c, 0xfc41a1, 0xff5c0a,
-      0xa182fc, 0x1fc1c3, 0xc1fc1e, 0xfcfc1e
-    ];
-    const PAYLINES = config.paylinesDefinition || [];
-    const REEL_WIDTH = 150, REEL_HEIGHT = 150, START_X = 350, START_Y = this.reelStartY;
-    const PUCK_RADIUS = 38;
-    const OUTSIDE_X = START_X + (4 * REEL_WIDTH) + 140;
-    
-    // Calculate total win for effects
-    const totalWin = winningLines.reduce((sum, line) => sum + line.winAmount, 0);
-    const winMultiplier = totalWin / this.currentBet;
-    
-    // Add screen effects for big wins
-    if (winMultiplier >= 25) {
-      this.showBigWinEffects(totalWin);
-    } else if (winMultiplier >= 10) {
-      this.showMediumWinEffects(totalWin);
-    }
-    
-    // Clear previous lines
-    this.winLineGraphics.clear();
-    
-    // Remove old pucks and win labels
-    this.children.list.forEach(child => {
-      if (child.getData && child.getData('isWinPuck')) child.destroy();
-      if (child.getData && child.getData('isWinLabel')) child.destroy();
-    });
-    
-    // Prepare a map to stack win labels by row
-    const rowLabelMap = {};
-    
-    winningLines.forEach((winInfo, idx) => {
-      // Delay each line reveal for cascading effect
-      this.time.delayedCall(idx * 200, () => {
-        if (winInfo.lineIndex === -1) {
-          // Scatter win
-          winInfo.symbolPositions.forEach(([r, w]) => {
-            this._drawPuckOverSymbol(r, w, 0xFFD700, PUCK_RADIUS);
-          });
-          this.showWinLabel(
-            `SCATTER: ${winInfo.winAmount.toFixed(2)}`,
-            this.cameras.main.centerX,
-            START_Y - 55,
-            0xFFD700
-          );
-          return;
-        }
-        
-        // Color selection
-        const color = NEON_COLORS[winInfo.lineIndex % NEON_COLORS.length];
-        const payline = PAYLINES[winInfo.lineIndex];
-        const points = payline.map(
-          ([r, w]) => ({
-            x: START_X + (r * REEL_WIDTH),
-            y: START_Y + (w * REEL_HEIGHT)
-          })
-        );
-        
-        // Draw glow line
-        this.winLineGraphics.lineStyle(14, color, 0.18);
-        this.winLineGraphics.beginPath();
-        this.winLineGraphics.moveTo(points[0].x, points[0].y);
-        for (let i = 1; i < points.length; i++) {
-          this.winLineGraphics.lineTo(points[i].x, points[i].y);
-        }
-        this.winLineGraphics.strokePath();
-        
-        // Draw bright core line
-        this.winLineGraphics.lineStyle(5, color, 0.95);
-        this.winLineGraphics.beginPath();
-        this.winLineGraphics.moveTo(points[0].x, points[0].y);
-        for (let i = 1; i < points.length; i++) {
-          this.winLineGraphics.lineTo(points[i].x, points[i].y);
-        }
-        this.winLineGraphics.strokePath();
-        
-        // Puck burst over each winning symbol
-        winInfo.symbolPositions.forEach(([r, w], symbolIdx) => {
-          this.time.delayedCall(symbolIdx * 50, () => {
-            this._drawPuckOverSymbol(r, w, color, PUCK_RADIUS);
-          });
-        });
-        
-        // Place win label to the right of 5th reel
-        const [finalReel, finalRow] = payline[payline.length - 1];
-        const targetRow = typeof finalRow === 'number' ? finalRow : 1;
-        if (!rowLabelMap[targetRow]) rowLabelMap[targetRow] = [];
-        rowLabelMap[targetRow].push({
-          color,
-          amount: winInfo.winAmount,
-        });
-      });
-    });
-    
-    // Render all stacked win labels
-    this.time.delayedCall(winningLines.length * 200 + 100, () => {
-      Object.entries(rowLabelMap).forEach(([row, arr]) => {
-        const baseY = START_Y + (row * REEL_HEIGHT);
-        arr.forEach((info, idx) => {
-          this.showWinLabel(
-            `WIN: ${info.amount.toFixed(2)}`,
-            OUTSIDE_X,
-            baseY + idx * 32 - (arr.length - 1) * 16,
-            info.color
-          );
-        });
-      });
-    });
-  }
- 
-  _drawPuckOverSymbol(reel, row, color, radius) {
-    const REEL_WIDTH = 150, REEL_HEIGHT = 150, START_X = 350, START_Y = this.reelStartY;
-    const x = START_X + (reel * REEL_WIDTH);
-    const y = START_Y + (row * REEL_HEIGHT);
- 
-    const puck = this.add.circle(x, y, radius, color, 0.34)
-      .setStrokeStyle(2, 0xffffff, 0.7)
-      .setDepth(1550)
-      .setData('isWinPuck', true)
-      .setAlpha(0);
-      
-    this.tweens.add({
-      targets: puck,
-      alpha: 1,
-      scale: { from: 0.85, to: 1.11 },
-      yoyo: true,
-      duration: 180,
-      ease: 'Quad.easeOut'
-    });
-  }
- 
-  showWinLabel(text, x, y, color) {
-    // Use MainScene-style win labels
-    const rectWidth = 130;
-    const rectHeight = 36;
-    const cornerRadius = 1;
-    
-    const rect = this.add.graphics();
-    rect.fillStyle(0x111111, 0.96);
-    rect.lineStyle(3, color, 0.89);
-    rect.fillRoundedRect(x - rectWidth/2, y - rectHeight/2, rectWidth, rectHeight, cornerRadius);
-    rect.strokeRoundedRect(x - rectWidth/2, y - rectHeight/2, rectWidth, rectHeight, cornerRadius);
-    rect.setDepth(1600);
-    rect.setAlpha(1);
-    rect.setData('isWinLabel', true);
-    
-    const style = {
-      fontSize: '20px',
-      fontFamily: 'Arial, Helvetica, sans-serif',
-      color: '#FFFFFF',
-      align: 'center',
-      shadow: {
-        offsetX: 0, offsetY: 2, color: '#000', blur: 8, fill: true
-      }
-    };
-    
-    const label = this.add.text(x, y, text, style)
-      .setOrigin(0.5)
-      .setDepth(1601)
-      .setAlpha(1)
-      .setData('isWinLabel', true);
-  }
- 
-  showWinMessage(amount) {
-    const msg = this.add.text(640, 360, `WIN: ${amount.toFixed(2)}`, {
-      fontSize: '32px',
-      color: '#FFD700',
-      stroke: '#000000',
-      strokeThickness: 5
-    })
-    .setOrigin(0.5)
-    .setDepth(2000)
-    .setAlpha(0)
-    .setData('isWinLabel', true);
-    
-    this.tweens.add({
-      targets: msg,
-      alpha: 1,
-      scale: 1.1,
-      duration: 300,
-      yoyo: true,
-      hold: 800,
-      ease: 'Power1'
-    });
-  }
- 
-  showBigWinEffects(totalWin) {
-    // Screen flash
-    const flash = this.add.rectangle(640, 360, 1280, 720, 0xFFFFFF, 0.8)
-      .setDepth(2500);
-    
-    this.tweens.add({
-      targets: flash,
-      alpha: 0,
-      duration: 300,
-      onComplete: () => flash.destroy()
-    });
-    
-    // Camera shake
-    this.cameras.main.shake(300, 0.01);
-    
-    // Big win text
-    const bigWinText = this.add.text(640, 200, 'BIG WIN!', {
-      fontSize: '72px',
-      color: '#FFD700',
-      stroke: '#000000',
-      strokeThickness: 6,
-      fontFamily: 'Arial Black'
-    })
-    .setOrigin(0.5)
-    .setDepth(2600)
-    .setScale(0);
-    
-    this.tweens.add({
-      targets: bigWinText,
-      scale: 1.2,
-      duration: 500,
-      ease: 'Back.easeOut',
-      yoyo: true,
-      hold: 1000,
-      onComplete: () => bigWinText.destroy()
-    });
-    
-    // Particle effects
-    this.createWinParticles(totalWin);
-  }
- 
-  showMediumWinEffects(totalWin) {
-    // Glow effect
-    const glow = this.add.sprite(640, 360, 'beer')
-      .setAlpha(0.3)
-      .setScale(15)
-      .setTint(0xFFD700)
-      .setDepth(10);
-    
-    this.tweens.add({
-      targets: glow,
-      alpha: 0,
-      scale: 20,
-      duration: 1000,
-      onComplete: () => glow.destroy()
-    });
-  }
- 
-  createWinParticles(winAmount) {
-    const particleCount = Math.min(50, Math.floor(winAmount / this.currentBet));
-    
-    for (let i = 0; i < particleCount; i++) {
-      const x = Phaser.Math.Between(200, 1080);
-      const y = Phaser.Math.Between(200, 520);
-      
-      const particle = this.add.sprite(x, y, 'beer')
-        .setScale(0.3)
-        .setAlpha(0)
-        .setDepth(2400);
-      
-      this.tweens.add({
-        targets: particle,
-        alpha: 1,
-        scale: 0.5,
-        x: x + Phaser.Math.Between(-100, 100),
-        y: y - Phaser.Math.Between(50, 150),
-        duration: Phaser.Math.Between(1000, 2000),
-        delay: i * 20,
-        ease: 'Power2',
-        onComplete: () => {
-          this.tweens.add({
-            targets: particle,
-            alpha: 0,
-            duration: 500,
-            onComplete: () => particle.destroy()
-          });
-        }
-      });
-    }
-  }
  
   endBonus() {
     console.log(`FreeSpinsScene: endBonus() called. Win: ${this.totalWin}. State: ${this.spinState}`);
@@ -1109,9 +785,426 @@ export default class FreeSpinsScene extends Phaser.Scene {
       
       this.time.delayedCall(100, () => {
         console.log("FreeSpinsScene: Stopping FreeSpinsScene now.");
+        // Claude suggested addition on 2025-06-08: Cleanup ambient embers when scene ends
+        this.cleanupAmbientEmbers();
         this.events.removeAllListeners();
         this.scene.stop();
       });
     }, [], this);
+  }
+
+  // Claude suggested addition on 2025-06-08: Phase 1 - Ember Particle System Manager
+  createEmberShower() {
+    console.log("FS: Creating ember shower effect");
+    
+    // Claude suggested fix on 2025-06-08: Embers rise from campfire, float up, then fall down to reels
+    const emberCount = Phaser.Math.Between(7, 12); // Increased count as requested
+    const campfireX = this.cameras.main.width * 0.8; // Campfire position (slightly left from edge)
+    const campfireY = this.cameras.main.height * 0.85; // Bottom area where campfire is
+    
+    for (let i = 0; i < emberCount; i++) {
+      // Claude suggested fix on 2025-06-08: Start embers slightly higher
+      // Spawn embers from the campfire area
+      const ember = this.add.circle(
+        campfireX + Phaser.Math.Between(-40, 40),
+        campfireY - 30 + Phaser.Math.Between(-20, 20), // Raised by 30 pixels
+        Phaser.Math.Between(3, 7),
+        0xFF6600,
+        0.8
+      ).setDepth(1999); // High depth to appear over everything
+      
+      // Add glow effect
+      ember.setStrokeStyle(2, 0xFFCC00, 0.6);
+      
+      this.emberParticles.push(ember);
+      
+      // Claude suggested fix on 2025-06-08: All embers travel over reels, only some ignite
+      // Check if this ember should actually ignite a reel (expand wild reel)
+      const shouldIgniteReel = this.shouldEmberTargetReel();
+      
+      // All embers travel over random reels for natural movement
+      const pathOverReels = this.generateEmberPath();
+      
+      if (shouldIgniteReel.target) {
+        // This ember will ignite the designated expanding wild reel
+        this.animateEmberOverReelsWithIgnition(ember, pathOverReels, shouldIgniteReel.reelIndex, i * 100);
+      } else {
+        // This ember just travels over reels but doesn't ignite anything
+        this.animateEmberOverReels(ember, pathOverReels, i * 50);
+      }
+    }
+  }
+  
+  shouldEmberTargetReel() {
+    // Only target reels that will actually expand (based on this.reelsToExpand)
+    if (this.reelsToExpand && this.reelsToExpand.length > 0) {
+      // Find reels that will expand but aren't already inferno reels
+      const availableReels = this.reelsToExpand.filter(reel => !this.infernoReels[reel]);
+      
+      if (availableReels.length > 0) {
+        // 70% chance to target an expanding reel
+        if (Math.random() < 0.7) {
+          const targetReel = availableReels[Math.floor(Math.random() * availableReels.length)];
+          return { target: true, reelIndex: targetReel };
+        }
+      }
+    }
+    
+    return { target: false };
+  }
+  
+  generateEmberPath() {
+    // Claude suggested addition on 2025-06-08: Generate random path over reels
+    const startReel = Phaser.Math.Between(0, 4); // Which reel to start over
+    const reelSpan = Phaser.Math.Between(1, 5 - startReel); // How many reels to cross
+    const floatHeight = this.reelStartY - Phaser.Math.Between(100, 200); // Above reels
+    
+    return {
+      startReel: startReel,
+      endReel: startReel + reelSpan - 1,
+      floatHeight: floatHeight,
+      reelSpan: reelSpan
+    };
+  }
+  
+  animateEmberOverReelsWithIgnition(ember, path, igniteReel, delay) {
+    this.time.delayedCall(delay, () => {
+      if (!ember.scene) return; // Safety check
+      
+      const startX = 350 + path.startReel * 150;
+      const endX = 350 + path.endReel * 150;
+      const igniteX = 350 + igniteReel * 150;
+      const igniteY = this.reelStartY + Phaser.Math.Between(0, 2) * 150;
+      
+      // Phase 1: Float up and drift to start of reel path
+      this.tweens.add({
+        targets: ember,
+        x: startX + Phaser.Math.Between(-30, 30),
+        y: path.floatHeight,
+        duration: 1500,
+        ease: 'Power2.easeOut',
+        onComplete: () => {
+          // Phase 2: Travel across reels
+          this.tweens.add({
+            targets: ember,
+            x: endX + Phaser.Math.Between(-30, 30),
+            y: path.floatHeight + Phaser.Math.Between(-20, 20), // Slight bobbing
+            duration: 1000,
+            ease: 'Sine.easeInOut',
+            onComplete: () => {
+              // Phase 3: Drop down to ignite specific reel (might not be on the path)
+              this.tweens.add({
+                targets: ember,
+                x: igniteX + Phaser.Math.Between(-20, 20),
+                y: igniteY,
+                duration: 1200,
+                ease: 'Quad.easeIn',
+                onComplete: () => {
+                  this.triggerInfernoReel(igniteReel, igniteX, igniteY);
+                  this.destroyEmber(ember);
+                }
+              });
+            }
+          });
+        }
+      });
+      
+      // Fade during entire journey
+      this.tweens.add({
+        targets: ember,
+        alpha: 0.9,
+        duration: 3700, // Total journey time
+        ease: 'Power1'
+      });
+    });
+  }
+  
+  animateEmberOverReels(ember, path, delay) {
+    this.time.delayedCall(delay, () => {
+      if (!ember.scene) return;
+      
+      const startX = 350 + path.startReel * 150;
+      const endX = 350 + path.endReel * 150;
+      
+      // Phase 1: Float up and drift to start of reel path  
+      this.tweens.add({
+        targets: ember,
+        x: startX + Phaser.Math.Between(-30, 30),
+        y: path.floatHeight,
+        duration: 1500,
+        ease: 'Power2.easeOut',
+        onComplete: () => {
+          // Phase 2: Travel across reels
+          this.tweens.add({
+            targets: ember,
+            x: endX + Phaser.Math.Between(-30, 30),
+            y: path.floatHeight + Phaser.Math.Between(-20, 20), // Slight bobbing
+            duration: 1000,
+            ease: 'Sine.easeInOut',
+            onComplete: () => {
+              // Phase 3: Continue falling off screen (no ignition)
+              this.tweens.add({
+                targets: ember,
+                x: ember.x + Phaser.Math.Between(-100, 100),
+                y: this.cameras.main.height + 100,
+                duration: Phaser.Math.Between(1500, 2500),
+                ease: 'Quad.easeIn',
+                onComplete: () => this.destroyEmber(ember)
+              });
+            }
+          });
+        }
+      });
+      
+      // Fade out during journey
+      this.tweens.add({
+        targets: ember,
+        alpha: 0,
+        duration: Phaser.Math.Between(3500, 4500), // Total fade time
+        ease: 'Power2'
+      });
+    });
+  }
+  
+  
+  triggerInfernoReel(reelIndex, x, y) {
+    // Claude suggested fix on 2025-06-08: Only trigger if reel isn't already on fire
+    if (this.infernoReels[reelIndex]) {
+      console.log(`FS: Ember landed on reel ${reelIndex} but it's already on fire - no effect`);
+      return; // Already on fire, no message or effect
+    }
+    
+    console.log(`FS: Triggering Inferno Reel ${reelIndex}`);
+    this.infernoReels[reelIndex] = true;
+    
+    // Create dramatic ignition effect (only when actually igniting)
+    this.createIgnitionEffect(x, y);
+    
+    // Create fire background for this reel
+    this.createInfernoBackground(reelIndex);
+    
+    // Play ignition sound
+    // TODO: Add when audio assets are available
+    // this.sound.play('sfx_reel_ignition');
+  }
+  
+  createIgnitionEffect(x, y) {
+    // Flash effect at ignition point
+    const flash = this.add.circle(x, y, 80, 0xFF3300, 0.8)
+      .setDepth(2000);
+    
+    this.tweens.add({
+      targets: flash,
+      scale: 2,
+      alpha: 0,
+      duration: 300,
+      ease: 'Power2.easeOut',
+      onComplete: () => flash.destroy()
+    });
+    
+    // "INFERNO REEL!" message
+    const message = this.add.text(x, y - 50, 'INFERNO REEL!', {
+      fontSize: '24px',
+      color: '#FF3300',
+      stroke: '#000000',
+      strokeThickness: 3,
+      fontFamily: 'Arial Black'
+    }).setOrigin(0.5).setDepth(2001).setAlpha(0);
+    
+    this.tweens.add({
+      targets: message,
+      alpha: 1,
+      y: y - 80,
+      duration: 500,
+      ease: 'Back.easeOut',
+      onComplete: () => {
+        this.time.delayedCall(1000, () => {
+          this.tweens.add({
+            targets: message,
+            alpha: 0,
+            duration: 500,
+            onComplete: () => message.destroy()
+          });
+        });
+      }
+    });
+  }
+  
+  createInfernoBackground(reelIndex) {
+    const reelX = 350 + reelIndex * 150;
+    const reelY = this.reelStartY + 150; // Center of reel area
+    const reelWidth = 150;
+    const reelHeight = 150 * config.rows;
+    
+    // Create fire background overlay
+    const fireBackground = this.add.rectangle(
+      reelX, 
+      reelY, 
+      reelWidth - 5, 
+      reelHeight - 5, 
+      0xFF3300, 
+      0.3
+    ).setDepth(9); // Behind symbols but above normal backgrounds
+    
+    fireBackground.setStrokeStyle(3, 0xFF6600, 0.8);
+    
+    // Add pulsing animation
+    this.tweens.add({
+      targets: fireBackground,
+      alpha: { from: 0.3, to: 0.5 },
+      duration: 800,
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut'
+    });
+    
+    // Add crackling particle effects around the reel edges
+    this.createInfernoParticles(reelX, reelY, reelWidth, reelHeight);
+    
+    this.infernoBackgrounds[reelIndex] = fireBackground;
+    console.log(`FS: Created inferno background for reel ${reelIndex}`);
+  }
+  
+  createInfernoParticles(centerX, centerY, width, height) {
+    // Create small fire particles around the reel edges
+    for (let i = 0; i < 12; i++) {
+      const angle = (i / 12) * Math.PI * 2;
+      const radius = Math.max(width, height) * 0.6;
+      const x = centerX + Math.cos(angle) * radius;
+      const y = centerY + Math.sin(angle) * radius;
+      
+      const particle = this.add.circle(x, y, Phaser.Math.Between(2, 4), 0xFF6600, 0.7)
+        .setDepth(8);
+      
+      // Animate particles with random floating motion
+      this.tweens.add({
+        targets: particle,
+        x: x + Phaser.Math.Between(-20, 20),
+        y: y + Phaser.Math.Between(-20, 20),
+        alpha: { from: 0.7, to: 0.2 },
+        duration: Phaser.Math.Between(1500, 2500),
+        yoyo: true,
+        repeat: -1,
+        ease: 'Sine.easeInOut'
+      });
+      
+      this.emberParticles.push(particle); // Track for cleanup
+    }
+  }
+  
+  cleanupEmberSystem() {
+    console.log("FS: Cleaning up ember system");
+    
+    // Only clean up shower embers, keep ambient embers running
+    const showerEmbers = this.emberParticles.filter(ember => 
+      ember.depth === 1999 // High depth = shower embers
+    );
+    
+    showerEmbers.forEach(ember => {
+      if (ember?.scene) ember.destroy();
+      const index = this.emberParticles.indexOf(ember);
+      if (index > -1) {
+        this.emberParticles.splice(index, 1);
+      }
+    });
+    
+    // Destroy inferno backgrounds
+    this.infernoBackgrounds.forEach(bg => {
+      if (bg?.scene) bg.destroy();
+    });
+    this.infernoBackgrounds = [];
+    
+    // Clear ember timing controller
+    if (this.emberTimingController) {
+      this.emberTimingController.destroy();
+      this.emberTimingController = null;
+    }
+    
+    // Reset inferno reel states
+    this.infernoReels = [false, false, false, false, false];
+  }
+  
+  destroyEmber(ember) {
+    if (ember?.scene) {
+      ember.destroy();
+      const index = this.emberParticles.indexOf(ember);
+      if (index > -1) {
+        this.emberParticles.splice(index, 1);
+      }
+    }
+  }
+  
+  // Claude suggested addition on 2025-06-08: Ambient floating ember system
+  createAmbientEmbers() {
+    console.log("FS: Creating ambient floating embers");
+    
+    // Create initial batch of ambient embers
+    for (let i = 0; i < 3; i++) {
+      this.time.delayedCall(i * 2000, () => {
+        this.spawnAmbientEmber();
+      });
+    }
+    
+    // Continue spawning ambient embers periodically
+    this.ambientEmberTimer = this.time.addEvent({
+      delay: Phaser.Math.Between(4000, 8000), // Every 4-8 seconds
+      callback: this.spawnAmbientEmber,
+      callbackScope: this,
+      loop: true
+    });
+  }
+  
+  spawnAmbientEmber() {
+    if (!this.scene || this.emberParticles.length > 20) return; // Limit total embers
+    
+    const campfireX = this.cameras.main.width * 0.8;
+    const campfireY = this.cameras.main.height * 0.85;
+    
+    // Create small ambient ember
+    const ember = this.add.circle(
+      campfireX + Phaser.Math.Between(-30, 30),
+      campfireY + Phaser.Math.Between(-15, 15),
+      Phaser.Math.Between(2, 4), // Smaller than shower embers
+      0xFF6600,
+      0.6 // More subtle
+    ).setDepth(500); // Lower depth, behind main action
+    
+    ember.setStrokeStyle(1, 0xFFCC00, 0.4);
+    this.emberParticles.push(ember);
+    
+    // Gentle floating animation
+    this.tweens.add({
+      targets: ember,
+      x: ember.x + Phaser.Math.Between(-200, 300),
+      y: ember.y - Phaser.Math.Between(200, 400),
+      duration: Phaser.Math.Between(8000, 15000), // Long, slow float
+      ease: 'Sine.easeInOut',
+      onComplete: () => this.destroyEmber(ember)
+    });
+    
+    // Gentle fade and pulse
+    this.tweens.add({
+      targets: ember,
+      alpha: { from: 0.6, to: 0.1 },
+      duration: Phaser.Math.Between(8000, 15000),
+      ease: 'Power2'
+    });
+    
+    // Subtle size pulsing
+    this.tweens.add({
+      targets: ember,
+      scale: { from: 1, to: 1.3 },
+      duration: Phaser.Math.Between(2000, 4000),
+      yoyo: true,
+      repeat: -1,
+      ease: 'Sine.easeInOut'
+    });
+  }
+  
+  cleanupAmbientEmbers() {
+    if (this.ambientEmberTimer) {
+      this.ambientEmberTimer.destroy();
+      this.ambientEmberTimer = null;
+    }
   }
  }

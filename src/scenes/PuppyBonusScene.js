@@ -53,24 +53,26 @@ export default class PuppyBonusScene extends Phaser.Scene {
         // Create dog photo sprites (pickable items)
         this.dogPhotoSprites = [];
         const dogImages = ['elsi', 'ruby', 'marlin', 'minnow'];
-        const itemDisplaySize = 120;
+        const itemDisplaySize = 128; // Reduced by 20% from 160px (160 * 0.8 = 128)
     
-        // YOUR custom positions: (these match your earlier grid picks)
-        // [x, y] coordinates (change if you want to move any dog position!)
-        const puppySpots = [
-          [375, 100],
-          [505, 115],
-          [660, 90],
-          [800, 130],
-          [920, 70],
-          [410, 250],
-          [590, 265],
-          [695, 230],
-          [890, 325],
-          [425, 375],
-          [555, 390],
-          [300, 290],
-      ];
+        // Clean grid layout - two rows of 6 puppies each
+        // Claude suggested adjustment on 2025-06-08: Moved up and reduced size by 20%
+        const puppySpots = [];
+        
+        const startX = 380;  // Just to the right of logo
+        const spacingX = 140; // Consistent horizontal spacing
+        const row1Y = 70;    // Top row Y position (moved up from 130)
+        const row2Y = 220;    // Bottom row Y position (moved up from 250)
+        
+        // First row - 6 puppies
+        for (let i = 0; i < 6; i++) {
+          puppySpots.push([startX + (i * spacingX), row1Y]);
+        }
+        
+        // Second row - 6 puppies  
+        for (let i = 0; i < 6; i++) {
+          puppySpots.push([startX + (i * spacingX), row2Y]);
+        }
     
         for (let i = 0; i < puppySpots.length; i++) {
           const [x, y] = puppySpots[i];
@@ -88,7 +90,7 @@ export default class PuppyBonusScene extends Phaser.Scene {
     
           // Draw border first
           const borderGraphics = this.add.graphics();
-          borderGraphics.lineStyle(1, 0xffffff, 1); // 4px white border
+          borderGraphics.lineStyle(4, 0xffffff, 1); // 4px white border for better visibility
           borderGraphics.strokeCircle(dogPhoto.x, dogPhoto.y, maskRadius + 2);
           borderGraphics.setDepth(dogPhoto.depth - 1);
     

@@ -10,7 +10,7 @@ export default class OutcomeManager {
       // No Win - 55%
       { weight: 5500, type: 'no_win', rtp: 0, description: 'No winning combination' },
       
-      // Near Misses - 8.5ls% (NEW)
+      // Near Misses - 8.5% (NEW)
       { weight: 550, type: 'near_miss_scatter_2', rtp: 0.2, scatters: 2, description: '2 scatters - near miss' },
       { weight: 300, type: 'near_miss_bonus_2', rtp: 0, bonusSymbols: 2, description: '2 bonus symbols - near miss' },
       

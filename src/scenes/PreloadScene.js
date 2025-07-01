@@ -113,6 +113,7 @@ this.load.audio('sfx_near_miss', 'assets/sounds/sfx_near_miss.mp3');
 this.load.audio('sfx_scatter_anticipation', 'assets/sounds/sfx_scatter_anticipation.mp3');
 this.load.audio('sfx_reel_stop_dramatic', 'assets/sounds/sfx_reel_stop_dramatic.mp3');
 this.load.audio('sfx_anticipation_heartbeat', 'assets/sounds/sfx_anticipation_heartbeat.mp3');
+this.load.audio('music_main', 'assets/sounds/music_main.mp3'); // Claude suggested addition on 2025-06-08: Background music
 
       console.log('All assets loaded successfully');
     } catch (e) {

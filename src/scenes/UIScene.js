@@ -85,7 +85,23 @@ export default class UIScene extends Phaser.Scene {
       align: 'center'
     })
     .setOrigin(0, 0)
-    .setInteractive({ useHandCursor: true });
+    .setInteractive({ useHandCursor: true })
+    .on('pointerdown', this.showPaytable, this); // Claude suggested fix on 2025-06-08: Added missing click handler
+
+    // Claude suggested addition on 2025-06-08: Cashout button in top right corner
+    this.cashoutButton = this.add.text(this.cameras.main.width - 5, 5, 'CASHOUT', {
+      fontSize: '28px',
+      fontFamily: 'Arial Black',
+      color: '#FFD700',
+      backgroundColor: '#222A',
+      stroke: '#000',
+      strokeThickness: 3,
+      padding: { left: 20, right: 20, top: 10, bottom: 10 },
+      align: 'center'
+    })
+    .setOrigin(1, 0) // Right-aligned origin
+    .setInteractive({ useHandCursor: true })
+    .on('pointerdown', this.showCashoutConfirmation, this);
   
   
     buttonStartY += 36;
@@ -100,6 +116,13 @@ export default class UIScene extends Phaser.Scene {
         buttonStartX, buttonStartY, 'DEBUG: Puppy Bonus',
         { fontSize: '18px', color: '#FFFFFF', backgroundColor: '#004488', padding: { x: 12, y: 6 } }
       ).setOrigin(0, 0).setDepth(1100).setInteractive().on('pointerdown', this.triggerDebugPuppy, this);
+
+      // Claude suggested addition on 2025-06-08: Debug add credits button
+      buttonStartY += 36;
+      this.debugAddCreditsButton = this.add.text(
+        buttonStartX, buttonStartY, 'DEBUG: Add Credits',
+        { fontSize: '18px', color: '#FFFFFF', backgroundColor: '#004488', padding: { x: 12, y: 6 } }
+      ).setOrigin(0, 0).setDepth(1100).setInteractive().on('pointerdown', this.addDebugCredits, this);
     }
   }
 
@@ -391,4 +414,78 @@ export default class UIScene extends Phaser.Scene {
     if (mainScene && typeof mainScene.triggerDebugPuppy === 'function') mainScene.triggerDebugPuppy();
   }
   triggerDebugpuppy() { this.triggerDebugPuppy(); }
+
+  // Claude suggested addition on 2025-06-08: Cashout confirmation dialog
+  showCashoutConfirmation() {
+    if (this.isSpinning) return; // Prevent cashout during spins
+    if (this.credits <= 0) return; // No need to cashout if no credits
+
+    // Create semi-transparent overlay
+    const overlay = this.add.rectangle(0, 0, this.cameras.main.width, this.cameras.main.height, 0x000000, 0.7);
+    overlay.setOrigin(0).setDepth(5000);
+
+    // Create confirmation dialog box
+    const dialogBg = this.add.rectangle(640, 360, 400, 200, 0x333333, 1.0);
+    dialogBg.setStrokeStyle(3, 0xFFD700).setDepth(5001);
+
+    // Dialog text
+    const confirmText = this.add.text(640, 320, 'Are you sure you want to cashout?', {
+      fontSize: '20px',
+      color: '#FFFFFF',
+      fontFamily: 'Arial',
+      align: 'center'
+    }).setOrigin(0.5).setDepth(5002);
+
+    const creditsText = this.add.text(640, 350, `Credits: ${this.credits.toFixed(2)}`, {
+      fontSize: '18px',
+      color: '#FFD700',
+      fontFamily: 'Arial',
+      align: 'center'
+    }).setOrigin(0.5).setDepth(5002);
+
+    // Yes button
+    const yesButton = this.add.text(580, 400, 'YES', {
+      fontSize: '24px',
+      fontFamily: 'Arial Black',
+      color: '#FFFFFF',
+      backgroundColor: '#AA0000',
+      padding: { x: 20, y: 10 }
+    }).setOrigin(0.5).setDepth(5002).setInteractive({ useHandCursor: true });
+
+    // No button
+    const noButton = this.add.text(700, 400, 'NO', {
+      fontSize: '24px',
+      fontFamily: 'Arial Black',
+      color: '#FFFFFF',
+      backgroundColor: '#004400',
+      padding: { x: 20, y: 10 }
+    }).setOrigin(0.5).setDepth(5002).setInteractive({ useHandCursor: true });
+
+    // Button handlers
+    const cleanup = () => {
+      overlay.destroy();
+      dialogBg.destroy();
+      confirmText.destroy();
+      creditsText.destroy();
+      yesButton.destroy();
+      noButton.destroy();
+    };
+
+    yesButton.on('pointerdown', () => {
+      this.credits = 0;
+      this.updateCreditsText();
+      this.saveGameData();
+      cleanup();
+    });
+
+    noButton.on('pointerdown', cleanup);
+  }
+
+  // Claude suggested addition on 2025-06-08: Debug method to add credits
+  addDebugCredits() {
+    this.credits += 20;
+    this.updateCreditsText();
+    this.saveGameData();
+    console.log(`DEBUG: Added 20 credits. New total: ${this.credits}`);
+  }
 }

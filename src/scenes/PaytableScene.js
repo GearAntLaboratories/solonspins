@@ -66,8 +66,11 @@ export default class PaytableScene extends Phaser.Scene {
     // Keyboard controls
     this.input.keyboard.off('keydown-UP'); // Remove previous listeners if scene restarts
     this.input.keyboard.off('keydown-DOWN');
+    this.input.keyboard.off('keydown-ESC'); // Claude suggested addition on 2025-07-01: Remove previous ESC listener
     this.input.keyboard.on('keydown-UP', () => this.scrollContent(-30));
     this.input.keyboard.on('keydown-DOWN', () => this.scrollContent(30));
+    // Claude suggested addition on 2025-07-01: ESC key to exit paytable
+    this.input.keyboard.on('keydown-ESC', () => this.exitPaytable());
 
     // Mouse wheel
     this.input.off('wheel'); // Remove previous listener
@@ -303,5 +306,17 @@ export default class PaytableScene extends Phaser.Scene {
     console.log("Paytable content created. Height:", this.contentHeight);
     // --- DO NOT call updateScrollIndicators from here ---
  }
+
+  // Claude suggested addition on 2025-07-01: Method to exit paytable via ESC key
+  exitPaytable() {
+    this.scene.stop();
+    // Ensure scenes being resumed exist and are paused
+    if (this.scene.manager.getScene('MainScene') && this.scene.isPaused('MainScene')) {
+         this.scene.resume('MainScene');
+    }
+    if (this.scene.manager.getScene('UIScene') && this.scene.isPaused('UIScene')) {
+         this.scene.resume('UIScene');
+    }
+  }
 
 } // End of PaytableScene Class

@@ -11,6 +11,7 @@ export default class UIScene extends Phaser.Scene {
     this.isSpinning = false;
     this.gameStats = { totalSpins: 0, totalWins: 0, totalBet: 0, totalWon: 0, bonusTriggers: 0 };
     this.showStats = false; // CHANGED: Hide stats by default
+    this.isCashoutDialogActive = false; // Claude suggested addition on 2025-07-01: Track cashout dialog state
 
     this.onWin = this.onWin.bind(this);
     this.onSpinComplete = this.onSpinComplete.bind(this);
@@ -420,6 +421,9 @@ export default class UIScene extends Phaser.Scene {
     if (this.isSpinning) return; // Prevent cashout during spins
     if (this.credits <= 0) return; // No need to cashout if no credits
 
+    // Claude suggested addition on 2025-07-01: Set flag to prevent background keyboard actions
+    this.isCashoutDialogActive = true;
+
     // Create semi-transparent overlay
     const overlay = this.add.rectangle(0, 0, this.cameras.main.width, this.cameras.main.height, 0x000000, 0.7);
     overlay.setOrigin(0).setDepth(5000);
@@ -443,17 +447,9 @@ export default class UIScene extends Phaser.Scene {
       align: 'center'
     }).setOrigin(0.5).setDepth(5002);
 
-    // Yes button
+    // Claude suggested change on 2025-07-01: Switch colors - Yes=Green, No=Red
+    // Yes button (Green)
     const yesButton = this.add.text(580, 400, 'YES', {
-      fontSize: '24px',
-      fontFamily: 'Arial Black',
-      color: '#FFFFFF',
-      backgroundColor: '#AA0000',
-      padding: { x: 20, y: 10 }
-    }).setOrigin(0.5).setDepth(5002).setInteractive({ useHandCursor: true });
-
-    // No button
-    const noButton = this.add.text(700, 400, 'NO', {
       fontSize: '24px',
       fontFamily: 'Arial Black',
       color: '#FFFFFF',
@@ -461,8 +457,21 @@ export default class UIScene extends Phaser.Scene {
       padding: { x: 20, y: 10 }
     }).setOrigin(0.5).setDepth(5002).setInteractive({ useHandCursor: true });
 
+    // No button (Red)
+    const noButton = this.add.text(700, 400, 'NO', {
+      fontSize: '24px',
+      fontFamily: 'Arial Black',
+      color: '#FFFFFF',
+      backgroundColor: '#AA0000',
+      padding: { x: 20, y: 10 }
+    }).setOrigin(0.5).setDepth(5002).setInteractive({ useHandCursor: true });
+
     // Button handlers
     const cleanup = () => {
+      // Claude suggested addition on 2025-07-01: Clear flag and remove keyboard listeners when cleaning up
+      this.isCashoutDialogActive = false;
+      this.input.keyboard.off('keydown-SPACE', spaceHandler);
+      this.input.keyboard.off('keydown-ESC', escHandler);
       overlay.destroy();
       dialogBg.destroy();
       confirmText.destroy();
@@ -471,14 +480,34 @@ export default class UIScene extends Phaser.Scene {
       noButton.destroy();
     };
 
-    yesButton.on('pointerdown', () => {
+    const yesAction = () => {
       this.credits = 0;
       this.updateCreditsText();
       this.saveGameData();
       cleanup();
-    });
+    };
 
-    noButton.on('pointerdown', cleanup);
+    const noAction = () => {
+      cleanup();
+    };
+
+    // Claude suggested addition on 2025-07-01: Keyboard shortcuts for cashout confirmation
+    const spaceHandler = (event) => {
+      event.stopPropagation();
+      yesAction();
+    };
+
+    const escHandler = (event) => {
+      event.stopPropagation();
+      noAction();
+    };
+
+    // Add keyboard listeners
+    this.input.keyboard.on('keydown-SPACE', spaceHandler);
+    this.input.keyboard.on('keydown-ESC', escHandler);
+
+    yesButton.on('pointerdown', yesAction);
+    noButton.on('pointerdown', noAction);
   }
 
   // Claude suggested addition on 2025-06-08: Debug method to add credits

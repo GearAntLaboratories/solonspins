@@ -15,6 +15,10 @@ export default class PuppyBonusScene extends Phaser.Scene {
     this.isEnding = false;
     this.picksUsed = 0; // Track picks used
     
+    // Claude suggested addition on 2025-07-01: Keyboard navigation properties
+    this.selectedPuppyIndex = 0; // Currently highlighted puppy (starts at top-left)
+    this.borderGraphics = []; // Store border graphics for each puppy
+    
     // Initialize OutcomeManager
     this.outcomeManager = new OutcomeManager();
   }
@@ -26,6 +30,11 @@ export default class PuppyBonusScene extends Phaser.Scene {
     this.totalWin = 0;
     this.isEnding = false;
     this.picksUsed = 0;
+    
+    // Claude suggested fix on 2025-07-01: Reset keyboard navigation state for reused scenes
+    this.selectedPuppyIndex = 0;
+    this.borderGraphics = [];
+    this.dogPhotoSprites = [];
   }
 
   create() {
@@ -88,11 +97,14 @@ export default class PuppyBonusScene extends Phaser.Scene {
           // ---- Mask code: Crop to a circle ----
           const maskRadius = itemDisplaySize / 2 - 10;
     
-          // Draw border first
+          // Claude suggested change on 2025-07-01: Store border graphics for highlighting system
           const borderGraphics = this.add.graphics();
-          borderGraphics.lineStyle(4, 0xffffff, 1); // 4px white border for better visibility
+          borderGraphics.lineStyle(4, 0xffffff, 1); // Default white border
           borderGraphics.strokeCircle(dogPhoto.x, dogPhoto.y, maskRadius + 2);
           borderGraphics.setDepth(dogPhoto.depth - 1);
+          
+          // Store border graphics for keyboard navigation highlighting
+          this.borderGraphics.push(borderGraphics);
     
           // Draw and apply the mask
           const maskGraphics = this.make.graphics({ x: 0, y: 0, add: false });
@@ -138,6 +150,10 @@ export default class PuppyBonusScene extends Phaser.Scene {
       })
       .setOrigin(0.5)
       .setDepth(1000);
+
+    // Claude suggested addition on 2025-07-01: Setup keyboard navigation
+    this.setupKeyboardControls();
+    this.updateHighlight(); // Highlight the first puppy initially
 
     console.log("PuppyBonusScene: create() finished.");
     this.sound.play('music_bonus_puppy_loop', { loop: true });
@@ -319,5 +335,98 @@ export default class PuppyBonusScene extends Phaser.Scene {
         this.scene.stop();
       });
     }, [], this);
+  }
+
+  // Claude suggested addition on 2025-07-01: Keyboard navigation methods
+  setupKeyboardControls() {
+    // Clear any existing listeners
+    this.input.keyboard.off('keydown-UP');
+    this.input.keyboard.off('keydown-DOWN');
+    this.input.keyboard.off('keydown-SPACE');
+    
+    // Up arrow - move right (next puppy)
+    this.input.keyboard.on('keydown-UP', () => {
+      if (!this.isEnding) {
+        this.moveSelection(1);
+      }
+    });
+    
+    // Down arrow - move left (previous puppy)
+    this.input.keyboard.on('keydown-DOWN', () => {
+      if (!this.isEnding) {
+        this.moveSelection(-1);
+      }
+    });
+    
+    // Space bar - select highlighted puppy
+    this.input.keyboard.on('keydown-SPACE', () => {
+      if (!this.isEnding) {
+        this.selectCurrentPuppy();
+      }
+    });
+  }
+
+  moveSelection(direction) {
+    // Move through the 12 puppies (2 rows of 6)
+    this.selectedPuppyIndex += direction;
+    
+    // Wrap around - if go past end, go to beginning; if go before beginning, go to end
+    if (this.selectedPuppyIndex >= this.dogPhotoSprites.length) {
+      this.selectedPuppyIndex = 0;
+    } else if (this.selectedPuppyIndex < 0) {
+      this.selectedPuppyIndex = this.dogPhotoSprites.length - 1;
+    }
+    
+    this.updateHighlight();
+  }
+
+  updateHighlight() {
+    // Reset all borders to white
+    this.borderGraphics.forEach((border, index) => {
+      if (border && border.scene) {
+        border.clear();
+        border.lineStyle(4, 0xffffff, 1); // White border
+        
+        // Get the puppy position to redraw border
+        const puppy = this.dogPhotoSprites[index];
+        if (puppy && puppy.scene) {
+          const maskRadius = (puppy.displayWidth || 128) / 2 - 10;
+          border.strokeCircle(puppy.x, puppy.y, maskRadius + 2);
+        }
+      }
+    });
+    
+    // Highlight the selected puppy with red border and hover effect
+    const selectedBorder = this.borderGraphics[this.selectedPuppyIndex];
+    const selectedPuppy = this.dogPhotoSprites[this.selectedPuppyIndex];
+    
+    if (selectedBorder && selectedBorder.scene && selectedPuppy && selectedPuppy.scene) {
+      // Clear and redraw with red border
+      selectedBorder.clear();
+      selectedBorder.lineStyle(4, 0xff0000, 1); // Red border
+      
+      const maskRadius = (selectedPuppy.displayWidth || 128) / 2 - 10;
+      selectedBorder.strokeCircle(selectedPuppy.x, selectedPuppy.y, maskRadius + 2);
+      
+      // Apply hover effect (scale up) if not revealed
+      if (!selectedPuppy.getData('revealed')) {
+        selectedPuppy.setScale(selectedPuppy.scaleX * 1.1, selectedPuppy.scaleY * 1.1);
+      }
+    }
+    
+    // Reset scale for all other puppies
+    this.dogPhotoSprites.forEach((puppy, index) => {
+      if (index !== this.selectedPuppyIndex && puppy && puppy.scene && !puppy.getData('revealed')) {
+        const itemDisplaySize = 128;
+        puppy.setDisplaySize(itemDisplaySize, itemDisplaySize);
+      }
+    });
+  }
+
+  selectCurrentPuppy() {
+    const selectedPuppy = this.dogPhotoSprites[this.selectedPuppyIndex];
+    if (selectedPuppy && selectedPuppy.scene && !selectedPuppy.getData('revealed')) {
+      this.revealPrize(selectedPuppy);
+    }
   }
 }

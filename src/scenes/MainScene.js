@@ -63,6 +63,9 @@ export default class MainScene extends Phaser.Scene {
     // Setup bonus event listeners through BonusManager
     this.bonusManager.setupEventListeners();
 
+    // Claude suggested addition on 2025-07-01: Keyboard shortcuts for game controls
+    this.setupKeyboardControls();
+
     console.log("MainScene: create() finished");
   }
 
@@ -487,31 +490,86 @@ export default class MainScene extends Phaser.Scene {
   }
 
   pauseBackgroundMusic() {
-    if (this.backgroundMusic && this.backgroundMusic.isPlaying) {
-      this.tweens.add({
-        targets: this.backgroundMusic,
-        volume: 0,
-        duration: 500,
-        ease: 'Power2',
-        onComplete: () => {
-          if (this.backgroundMusic) {
-            this.backgroundMusic.pause();
-          }
-        }
-      });
+    if (this.backgroundMusic) {
+      // Stop immediately instead of fade out to prevent overlapping
+      this.backgroundMusic.stop();
     }
   }
 
   resumeBackgroundMusic() {
-    if (this.backgroundMusic && this.backgroundMusic.isPaused) {
-      this.backgroundMusic.resume();
-      this.tweens.add({
-        targets: this.backgroundMusic,
-        volume: 0.3,
-        duration: 500,
-        ease: 'Power2'
-      });
+    if (this.backgroundMusic && !this.backgroundMusic.isPlaying) {
+      // Restart the music instead of resuming since we stopped it
+      this.backgroundMusic.play();
+      this.backgroundMusic.setVolume(0.3);
     }
+  }
+
+  // Claude suggested addition on 2025-07-01: Setup keyboard shortcuts for game controls
+  setupKeyboardControls() {
+    // Claude suggested fix on 2025-07-01: Remove any existing listeners first to prevent conflicts
+    this.input.keyboard.off('keydown-UP');
+    this.input.keyboard.off('keydown-DOWN');
+    this.input.keyboard.off('keydown-SPACE');
+    this.input.keyboard.off('keydown-ESC');
+    this.input.keyboard.off('keydown-PLUS');
+    this.input.keyboard.off('keydown-P');
+    this.input.keyboard.off('keydown-C'); // Claude suggested addition on 2025-07-01: C key for cashout test
+    
+    // Up arrow - Increase bet
+    this.input.keyboard.on('keydown-UP', () => {
+      const uiScene = this.scene.manager.getScene('UIScene');
+      if (uiScene && !uiScene.isCashoutDialogActive && typeof uiScene.increaseBet === 'function') {
+        uiScene.increaseBet();
+      }
+    });
+    
+    // Down arrow - Decrease bet
+    this.input.keyboard.on('keydown-DOWN', () => {
+      const uiScene = this.scene.manager.getScene('UIScene');
+      if (uiScene && !uiScene.isCashoutDialogActive && typeof uiScene.decreaseBet === 'function') {
+        uiScene.decreaseBet();
+      }
+    });
+    
+    // Space bar - Spin
+    this.input.keyboard.on('keydown-SPACE', () => {
+      const uiScene = this.scene.manager.getScene('UIScene');
+      if (uiScene && !uiScene.isCashoutDialogActive && typeof uiScene.onSpinClick === 'function') {
+        uiScene.onSpinClick();
+      }
+    });
+    
+    // Escape key - Cashout
+    this.input.keyboard.on('keydown-ESC', () => {
+      const uiScene = this.scene.manager.getScene('UIScene');
+      if (uiScene && !uiScene.isCashoutDialogActive && typeof uiScene.showCashoutConfirmation === 'function') {
+        uiScene.showCashoutConfirmation();
+      }
+    });
+    
+    // Plus key - Add credits
+    this.input.keyboard.on('keydown-PLUS', () => {
+      const uiScene = this.scene.manager.getScene('UIScene');
+      if (uiScene && !uiScene.isCashoutDialogActive && typeof uiScene.addDebugCredits === 'function') {
+        uiScene.addDebugCredits();
+      }
+    });
+    
+    // P key - Paytable
+    this.input.keyboard.on('keydown-P', () => {
+      const uiScene = this.scene.manager.getScene('UIScene');
+      if (uiScene && !uiScene.isCashoutDialogActive && typeof uiScene.showPaytable === 'function') {
+        uiScene.showPaytable();
+      }
+    });
+    
+    // Claude suggested addition on 2025-07-01: C key - Cashout
+    this.input.keyboard.on('keydown-C', () => {
+      const uiScene = this.scene.manager.getScene('UIScene');
+      if (uiScene && !uiScene.isCashoutDialogActive && typeof uiScene.showCashoutConfirmation === 'function') {
+        uiScene.showCashoutConfirmation();
+      }
+    });
   }
 
   // --- DEBUG METHODS---

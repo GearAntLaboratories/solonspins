@@ -66,6 +66,9 @@ export default class FreeSpinsScene extends Phaser.Scene {
     
     // Reset total win
     this.totalWin = 0;
+    
+    // Claude suggested fix on 2025-07-05: Ensure state is properly reset for second entry
+    this.spinState = 'idle';
 
     this.createNewBackground();
 
@@ -178,7 +181,9 @@ export default class FreeSpinsScene extends Phaser.Scene {
   }
 
   startNextSpin() {
+    console.log(`FS: startNextSpin() called. spinsRemaining: ${this.spinsRemaining}, spinState: ${this.spinState}`);
     if (this.spinsRemaining <= 0 || this.spinState !== 'idle') {
+        console.log(`FS: startNextSpin() blocked. spinsRemaining: ${this.spinsRemaining}, spinState: ${this.spinState}`);
         if (this.spinsRemaining <= 0 && this.spinState === 'idle') {
             this.endBonus();
         }

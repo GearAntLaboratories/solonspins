@@ -39,6 +39,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Audio**: `public/assets/sounds/` for SFX and music.
 - Webpack copies assets from `public/` to `dist/` during build.
 
+## Development Commands
+
+### Essential Commands
+- **Start Development**: `npm run dev` - Runs both frontend (port 8080) and backend (port 3000) concurrently
+- **Frontend Only**: `npm start` - Webpack dev server with hot reload
+- **Backend Only**: `npm run server` - Express server on port 3000
+- **Production Build**: `npm run build` - Creates optimized dist/ bundle
+- **Production Server**: `npm run pi` - Runs production server
+
+### Development Workflow
+- Frontend development uses Webpack dev server with hot reload on port 8080
+- Backend runs Express server on port 3000
+- API calls are proxied from frontend to backend in development
+- Use `npm run dev` for full-stack development
+
 ## Key Technical Details
 
 ### Slot Machine Mechanics

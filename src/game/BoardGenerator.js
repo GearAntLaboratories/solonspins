@@ -99,6 +99,9 @@ export default class BoardGenerator {
       }
     }
     
+    // Claude suggested addition on 2025-07-01: Add anticipation teaser symbols
+    this.addAnticipationTeasers(board);
+    
     // Verify no accidental wins - use a default bet for validation
     const wins = this.evaluateWins(board, 10);
     if (wins.totalWin > 0) {
@@ -145,6 +148,9 @@ export default class BoardGenerator {
       board[nextReel][nextRow] = otherSymbols[Math.floor(Math.random() * otherSymbols.length)];
     }
     
+    // Claude suggested addition on 2025-07-01: Add anticipation teaser symbols for winning spins too
+    this.addAnticipationTeasers(board);
+    
     // Verify win is within expected range
     const wins = this.evaluateWins(board, bet);
     const winMultiplier = wins.totalWin / bet;
@@ -164,22 +170,19 @@ export default class BoardGenerator {
     const symbols = this.outcomeManager.getSymbolIds().filter(s => s !== 'fire' && s !== 'elsi');
     
     for (let r = 0; r < this.config.reels; r++) {
-      let hasScatterOnReel = false;
       for (let row = 0; row < this.config.rows; row++) {
         // 5% chance for wild in random boards
         if (Math.random() < 0.05) {
           board[r][row] = 'loon';
         } else {
-          // Very rare chance for scatter (0.5%) but max 1 per reel
-          if (Math.random() < 0.005 && !hasScatterOnReel) {
-            board[r][row] = 'fire';
-            hasScatterOnReel = true;
-          } else {
-            board[r][row] = symbols[Math.floor(Math.random() * symbols.length)];
-          }
+          board[r][row] = symbols[Math.floor(Math.random() * symbols.length)];
         }
       }
     }
+    
+    // Claude suggested addition on 2025-07-01: Add anticipation teasers to random boards too
+    this.addAnticipationTeasers(board);
+    
     return board;
   }
 
@@ -297,6 +300,9 @@ export default class BoardGenerator {
     const otherSymbols = symbols.filter(s => s !== symbol);
     board[targetPayline[2][0]][targetPayline[2][1]] = otherSymbols[Math.floor(Math.random() * otherSymbols.length)];
     
+    // Claude suggested addition on 2025-07-01: Add anticipation teasers
+    this.addAnticipationTeasers(board);
+    
     // Verify the win is within expected range
     const wins = this.evaluateWins(board, bet);
     const winMultiplier = wins.totalWin / bet;
@@ -341,6 +347,9 @@ export default class BoardGenerator {
         board[r][row] = otherSymbols[Math.floor(Math.random() * otherSymbols.length)];
       }
     }
+    
+    // Claude suggested addition on 2025-07-01: Add anticipation teasers
+    this.addAnticipationTeasers(board);
     
     // Verify the win is within expected range
     const wins = this.evaluateWins(board, bet);
@@ -402,6 +411,9 @@ export default class BoardGenerator {
       }
     }
     
+    // Claude suggested addition on 2025-07-01: Add anticipation teasers
+    this.addAnticipationTeasers(board);
+    
     // Verify win is within expected range
     const wins = this.evaluateWins(board, bet);
     const winMultiplier = wins.totalWin / bet;
@@ -451,6 +463,9 @@ export default class BoardGenerator {
       board[nextReel][nextRow] = otherSymbols[Math.floor(Math.random() * otherSymbols.length)];
     }
     
+    // Claude suggested addition on 2025-07-01: Add anticipation teasers
+    this.addAnticipationTeasers(board);
+    
     // Verify win is within expected range
     const wins = this.evaluateWins(board, bet);
     const winMultiplier = wins.totalWin / bet;
@@ -494,6 +509,70 @@ export default class BoardGenerator {
     }
     
     return board;
+  }
+
+  // Claude suggested addition on 2025-07-01: Add anticipation teaser symbols to improve game feel
+  addAnticipationTeasers(board) {
+    // Add single fire symbol for anticipation (15% chance)
+    // Never add if outcome already contains fire symbols to avoid conflicts
+    if (Math.random() < 0.15) {
+      // Count existing fire symbols to ensure we don't exceed 1
+      let fireCount = 0;
+      for (let r = 0; r < this.config.reels; r++) {
+        for (let row = 0; row < this.config.rows; row++) {
+          if (board[r][row] === 'fire') fireCount++;
+        }
+      }
+      
+      // Only add fire if none exist (prevents accidental near-miss)
+      if (fireCount === 0) {
+        const reel = Math.floor(Math.random() * this.config.reels);
+        const row = Math.floor(Math.random() * this.config.rows);
+        board[reel][row] = 'fire';
+      }
+    }
+    
+    // Add 1-2 elsi symbols for anticipation (12% chance)
+    // Place in non-payline positions to avoid accidental bonus triggers
+    if (Math.random() < 0.12) {
+      // Count existing elsi symbols
+      let elsiCount = 0;
+      for (let r = 0; r < this.config.reels; r++) {
+        for (let row = 0; row < this.config.rows; row++) {
+          if (board[r][row] === 'elsi') elsiCount++;
+        }
+      }
+      
+      // Only add elsi if none exist
+      if (elsiCount === 0) {
+        const maxElsiToAdd = Math.random() < 0.7 ? 1 : 2; // 70% chance for 1, 30% for 2
+        
+        for (let attempts = 0; attempts < maxElsiToAdd && attempts < 10; attempts++) {
+          const reel = Math.floor(Math.random() * this.config.reels);
+          const row = Math.floor(Math.random() * this.config.rows);
+          
+          // Check if this position would create a payline trigger
+          let wouldTriggerPayline = false;
+          for (const payline of this.config.paylinesDefinition) {
+            let elsiOnPayline = 0;
+            for (const [paylineReel, paylineRow] of payline) {
+              if ((paylineReel === reel && paylineRow === row) || board[paylineReel][paylineRow] === 'elsi') {
+                elsiOnPayline++;
+              }
+            }
+            if (elsiOnPayline >= 3) { // Would trigger bonus
+              wouldTriggerPayline = true;
+              break;
+            }
+          }
+          
+          // Only place if it won't trigger a bonus
+          if (!wouldTriggerPayline && board[reel][row] !== 'elsi') {
+            board[reel][row] = 'elsi';
+          }
+        }
+      }
+    }
   }
 
   // Use WinEvaluator for win validation

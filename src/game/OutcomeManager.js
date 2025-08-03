@@ -38,9 +38,9 @@ export default class OutcomeManager {
       // Scatter Pays (no bonus trigger) - 0.5% (UPDATED)
       //{ weight: 50, type: 'scatter_pay_2', rtp: 0.2, scatters: 2, description: '2 scatters pay only' },
       
-      // Bonus Triggers - 2.5%
+      // Bonus Triggers - 2.5% //80
       { weight: 150, type: 'free_spins_trigger', rtp: 0, scatters: 3, freeSpins: 10, description: '3+ fire scatters' },
-      { weight: 80, type: 'puppy_bonus_3', rtp: 0, bonusSymbols: 3, picks: 3, description: '3 elsi bonus on payline' },
+      { weight: 800, type: 'puppy_bonus_3', rtp: 0, bonusSymbols: 3, picks: 3, description: '3 elsi bonus on payline' },
       { weight: 40, type: 'puppy_bonus_4', rtp: 0, bonusSymbols: 4, picks: 4, description: '4 elsi bonus on payline' },
       { weight: 10, type: 'puppy_bonus_5', rtp: 0, bonusSymbols: 5, picks: 5, description: '5 elsi bonus on payline' }
     ];

@@ -106,6 +106,8 @@ export default class UIScene extends Phaser.Scene {
   
   
     buttonStartY += 36;
+    // Claude suggested change on 2025-07-05: Temporarily hide debug buttons
+    /*
     if (process.env.NODE_ENV !== 'production') {
       this.debugFreeSpinsButton = this.add.text(
         buttonStartX, buttonStartY, 'DEBUG: Free Spins',
@@ -125,6 +127,7 @@ export default class UIScene extends Phaser.Scene {
         { fontSize: '18px', color: '#FFFFFF', backgroundColor: '#004488', padding: { x: 12, y: 6 } }
       ).setOrigin(0, 0).setDepth(1100).setInteractive().on('pointerdown', this.addDebugCredits, this);
     }
+    */
   }
 
   createTextDisplays() {
@@ -471,7 +474,8 @@ export default class UIScene extends Phaser.Scene {
       // Claude suggested addition on 2025-07-01: Clear flag and remove keyboard listeners when cleaning up
       this.isCashoutDialogActive = false;
       this.input.keyboard.off('keydown-SPACE', spaceHandler);
-      this.input.keyboard.off('keydown-ESC', escHandler);
+      // Claude suggested change on 2025-07-05: Remove C key listener instead of ESC
+      this.input.keyboard.off('keydown-C', cHandler);
       overlay.destroy();
       dialogBg.destroy();
       confirmText.destroy();
@@ -481,7 +485,8 @@ export default class UIScene extends Phaser.Scene {
     };
 
     const yesAction = () => {
-      this.credits = 0;
+      // Claude suggested change on 2025-07-05: Change cash out to move credits to $20 instead of $0
+      this.credits = 20;
       this.updateCreditsText();
       this.saveGameData();
       cleanup();
@@ -497,14 +502,18 @@ export default class UIScene extends Phaser.Scene {
       yesAction();
     };
 
-    const escHandler = (event) => {
+    // Claude suggested change on 2025-07-05: Change ESC to C key for 'no' action
+    const cHandler = (event) => {
       event.stopPropagation();
       noAction();
     };
 
     // Add keyboard listeners
     this.input.keyboard.on('keydown-SPACE', spaceHandler);
-    this.input.keyboard.on('keydown-ESC', escHandler);
+    // Claude suggested fix on 2025-07-05: Delay C key listener to prevent conflict with main scene
+    this.time.delayedCall(100, () => {
+      this.input.keyboard.on('keydown-C', cHandler);
+    });
 
     yesButton.on('pointerdown', yesAction);
     noButton.on('pointerdown', noAction);
